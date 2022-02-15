@@ -20,11 +20,6 @@ static void callback(xs_request *req, xs_response *res)
 
 int main()
 {
-	const unsigned short   port = 8080;
-	const unsigned int maxconns = 512;
-	fprintf(stderr, "port = %d\n", port);
-	fprintf(stderr, "maxconns = %d\n", maxconns);
-	xserver(callback, port, maxconns, 1);
-	/* Unreachable */
-	return 0;
+	xserver(callback, 8080, 512, 1);
+	return 0; /* Unreachable */
 }

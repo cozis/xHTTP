@@ -1,0 +1,1 @@
+gcc example.c xserver.c -o example -Wall -Wextra -g
