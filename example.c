@@ -1,7 +1,5 @@
 // build with:
-//   $ gcc main.c xserver.c -o app -Wall -Wextra -g
-
-#define XSERVER_IMPL
+//   $ gcc example.c xserver.c -o example -Wall -Wextra -g
 
 #include <stdio.h>
 #include "xserver.h"
