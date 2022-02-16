@@ -1,6 +1,18 @@
 #ifndef XSERVER_H
 #define XSERVER_H
 
+typedef enum {
+	XS_GET     = 1 << 0, 
+	XS_HEAD    = 1 << 1,
+	XS_POST    = 1 << 2,
+	XS_PUT     = 1 << 3,
+	XS_DELETE  = 1 << 4,
+	XS_CONNECT = 1 << 5,
+	XS_OPTIONS = 1 << 6,
+	XS_TRACE   = 1 << 7,
+	XS_PATCH   = 1 << 8,
+} xs_method;
+
 typedef struct {
 	char *name, *value;
 	unsigned int name_len;
@@ -8,6 +20,7 @@ typedef struct {
 } xs_header;
 
 typedef struct {
+	xs_method    method_id;
 	const char  *method;
 	unsigned int method_len;
 

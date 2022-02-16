@@ -357,15 +357,15 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 		#define PAIR(p, q) (uint64_t) (((uint64_t) p << 32) | (uint64_t) q)
 		switch(PAIR(req->method[0], method_length))
 			{
-				case PAIR('G', 3): unknown_method = !!strcmp(req->method, "GET"); 	 break;
-				case PAIR('H', 4): unknown_method = !!strcmp(req->method, "HEAD"); 	 break;
-				case PAIR('P', 4): unknown_method = !!strcmp(req->method, "POST"); 	 break;
-				case PAIR('P', 3): unknown_method = !!strcmp(req->method, "PUT"); 	 break;
-				case PAIR('D', 6): unknown_method = !!strcmp(req->method, "DELETE"); break;
-				case PAIR('C', 7): unknown_method = !!strcmp(req->method, "CONNECT"); break;
-				case PAIR('O', 7): unknown_method = !!strcmp(req->method, "OPTIONS"); break;
-				case PAIR('T', 5): unknown_method = !!strcmp(req->method, "TRACE"); break;
-				case PAIR('P', 5): unknown_method = !!strcmp(req->method, "PATCH"); break;
+				case PAIR('G', 3): req->method_id = XS_GET;     unknown_method = !!strcmp(req->method, "GET"); 	break;
+				case PAIR('H', 4): req->method_id = XS_HEAD;    unknown_method = !!strcmp(req->method, "HEAD"); break;
+				case PAIR('P', 4): req->method_id = XS_POST;    unknown_method = !!strcmp(req->method, "POST"); break;
+				case PAIR('P', 3): req->method_id = XS_PUT;     unknown_method = !!strcmp(req->method, "PUT"); 	break;
+				case PAIR('D', 6): req->method_id = XS_DELETE;  unknown_method = !!strcmp(req->method, "DELETE");  break;
+				case PAIR('C', 7): req->method_id = XS_CONNECT; unknown_method = !!strcmp(req->method, "CONNECT"); break;
+				case PAIR('O', 7): req->method_id = XS_OPTIONS; unknown_method = !!strcmp(req->method, "OPTIONS"); break;
+				case PAIR('T', 5): req->method_id = XS_TRACE;   unknown_method = !!strcmp(req->method, "TRACE"); break;
+				case PAIR('P', 5): req->method_id = XS_PATCH;   unknown_method = !!strcmp(req->method, "PATCH"); break;
 				default: unknown_method = 1; break;
 			}
 		#undef PAIR
