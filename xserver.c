@@ -611,6 +611,15 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 			}
 	}
 
+	_Bool head_only = conn->request.public.method_id == XS_HEAD;
+
+	if(head_only)
+		{
+			conn->request.public.method_id = XS_GET;
+			conn->request.public.method = "HEAD";
+			conn->request.public.method_len = sizeof("HEAD")-1;
+		}
+
 	xs_response2 res;
 	xs_response_init(&res);
 
@@ -656,7 +665,7 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 
 			append(conn, "\r\n", 2);
 
-			if(res.public.body != NULL && res.public.body_len > 0)
+			if(head_only == 0 && res.public.body != NULL && res.public.body_len > 0)
 				append(conn, res.public.body, res.public.body_len);
 		}
 
