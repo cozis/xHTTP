@@ -71,17 +71,17 @@ static void accept_connection(int fd, int epfd, conn_t **freelist, int *connum)
 		return; // Failed to accept.
 
 	if(!set_non_blocking(cfd))
-		{
-			(void) close(cfd);
-			return;
-		}
+	{
+		(void) close(cfd);
+		return;
+	}
 
 	if(*freelist == NULL)
-		{
-			// Connection limit reached.
-			(void) close(cfd);
-			return;
-		}
+	{
+		// Connection limit reached.
+		(void) close(cfd);
+		return;
+	}
 
 	conn_t *conn = *freelist;
 	*freelist = conn->next;
@@ -94,13 +94,13 @@ static void accept_connection(int fd, int epfd, conn_t **freelist, int *connum)
 	buffer.events = EPOLLET | EPOLLIN | EPOLLPRI | EPOLLOUT | EPOLLRDHUP;
 	buffer.data.ptr = conn;
 	if(epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &buffer))
-		{
-			(void) close(cfd);
+	{
+		(void) close(cfd);
 
-			conn->next = *freelist;
-			*freelist = conn;
-			return;
-		}
+		conn->next = *freelist;
+		*freelist = conn;
+		return;
+	}
 
 	*connum += 1;
 }
@@ -243,100 +243,100 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 	xs_header *headers = NULL;
 
 	while(1)
+	{
+		if(i == len)
 		{
-			if(i == len)
-				{
-					if(headers != NULL) free(headers);
-					return FAILURE("Missing blank line");
-				}
-
-			if(i+1 < len && str[i] == '\r' && str[i+1] == '\n')
-				{
-					// Blank line.
-					i += 2;
-					break;
-				}
-
-			uint32_t hname_offset = i;
-
-			skip_until(str, len, &i, ':');
-
-			uint32_t hname_length = i - hname_offset;
-
-			if(i == len)
-				{
-					if(headers != NULL) free(headers);
-					return FAILURE("Malformed header");
-				}
-
-			if(hname_length == 0)
-				{
-					if(headers != NULL) free(headers);
-					return FAILURE("Empty header name");
-				}
-
-			assert(str[i] == ':');
-
-			// Make the header name zero-terminated
-			// by overwriting the ':' with a '\0'.
-			str[i] = '\0';
-
-			i += 1; // Skip the ':'.
-
-			uint32_t hvalue_offset = i;
-
-			do
-				{
-					skip_until(str, len, &i, '\r');
-
-					if(i == len)
-						{
-							if(headers != NULL) free(headers);
-							return FAILURE("Malformed header");
-						}
-
-					assert(str[i] == '\r');
-					
-					i += 1; // Skip the \r.
-
-					if(i == len)
-						{
-							if(headers != NULL) free(headers);
-							return FAILURE("Malformed header");
-						}
-				}
-			while(str[i] != '\n');
-			assert(str[i] == '\n');
-			i += 1; // Skip the '\n'.
-
-			uint32_t hvalue_length = (i - 2) - hvalue_offset;
-
-			if(headerc == capacity)
-				{
-					int new_capacity = capacity == 0 ? 8 : capacity * 2;
-
-					void *temp = realloc(headers, new_capacity * sizeof(xs_header));
-				
-					if(temp == NULL)
-						{
-							if(headers != NULL) free(headers);
-							return INTERNAL_FAILURE("No memory");
-						}
-
-					capacity = new_capacity;
-					headers = temp;
-				}
-
-			headers[headerc++] = (xs_header) { 
-				.name      = str + hname_offset, 
-				.name_len  =       hname_length,
-				.value     = str + hvalue_offset, 
-				.value_len =       hvalue_length,
-			};
-
-			str[ hname_offset +  hname_length] = '\0';
-			str[hvalue_offset + hvalue_length] = '\0';
+			if(headers != NULL) free(headers);
+			return FAILURE("Missing blank line");
 		}
+
+		if(i+1 < len && str[i] == '\r' && str[i+1] == '\n')
+		{
+			// Blank line.
+			i += 2;
+			break;
+		}
+
+		uint32_t hname_offset = i;
+
+		skip_until(str, len, &i, ':');
+
+		uint32_t hname_length = i - hname_offset;
+
+		if(i == len)
+		{
+			if(headers != NULL) free(headers);
+			return FAILURE("Malformed header");
+		}
+
+		if(hname_length == 0)
+		{
+			if(headers != NULL) free(headers);
+			return FAILURE("Empty header name");
+		}
+
+		assert(str[i] == ':');
+
+		// Make the header name zero-terminated
+		// by overwriting the ':' with a '\0'.
+		str[i] = '\0';
+
+		i += 1; // Skip the ':'.
+
+		uint32_t hvalue_offset = i;
+
+		do
+		{
+			skip_until(str, len, &i, '\r');
+
+			if(i == len)
+			{
+				if(headers != NULL) free(headers);
+				return FAILURE("Malformed header");
+			}
+
+			assert(str[i] == '\r');
+			
+			i += 1; // Skip the \r.
+
+			if(i == len)
+			{
+				if(headers != NULL) free(headers);
+				return FAILURE("Malformed header");
+			}
+		}
+		while(str[i] != '\n');
+		assert(str[i] == '\n');
+		i += 1; // Skip the '\n'.
+
+		uint32_t hvalue_length = (i - 2) - hvalue_offset;
+
+		if(headerc == capacity)
+		{
+			int new_capacity = capacity == 0 ? 8 : capacity * 2;
+
+			void *temp = realloc(headers, new_capacity * sizeof(xs_header));
+		
+			if(temp == NULL)
+			{
+				if(headers != NULL) free(headers);
+				return INTERNAL_FAILURE("No memory");
+			}
+
+			capacity = new_capacity;
+			headers = temp;
+		}
+
+		headers[headerc++] = (xs_header) { 
+			.name      = str + hname_offset, 
+			.name_len  =       hname_length,
+			.value     = str + hvalue_offset, 
+			.value_len =       hvalue_length,
+		};
+
+		str[ hname_offset +  hname_length] = '\0';
+		str[hvalue_offset + hvalue_length] = '\0';
+	}
 
 	req->headers = headers;
 	req->headerc = headerc;
@@ -354,108 +354,108 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 
 		#define PAIR(p, q) (uint64_t) (((uint64_t) p << 32) | (uint64_t) q)
 		switch(PAIR(req->method[0], method_length))
-			{
-				case PAIR('G', 3): req->method_id = XS_GET;     unknown_method = !!strcmp(req->method, "GET"); 	break;
-				case PAIR('H', 4): req->method_id = XS_HEAD;    unknown_method = !!strcmp(req->method, "HEAD"); break;
-				case PAIR('P', 4): req->method_id = XS_POST;    unknown_method = !!strcmp(req->method, "POST"); break;
-				case PAIR('P', 3): req->method_id = XS_PUT;     unknown_method = !!strcmp(req->method, "PUT"); 	break;
-				case PAIR('D', 6): req->method_id = XS_DELETE;  unknown_method = !!strcmp(req->method, "DELETE");  break;
-				case PAIR('C', 7): req->method_id = XS_CONNECT; unknown_method = !!strcmp(req->method, "CONNECT"); break;
-				case PAIR('O', 7): req->method_id = XS_OPTIONS; unknown_method = !!strcmp(req->method, "OPTIONS"); break;
-				case PAIR('T', 5): req->method_id = XS_TRACE;   unknown_method = !!strcmp(req->method, "TRACE"); break;
-				case PAIR('P', 5): req->method_id = XS_PATCH;   unknown_method = !!strcmp(req->method, "PATCH"); break;
-				default: unknown_method = 1; break;
-			}
+		{
+			case PAIR('G', 3): req->method_id = XS_GET;     unknown_method = !!strcmp(req->method, "GET"); 	break;
+			case PAIR('H', 4): req->method_id = XS_HEAD;    unknown_method = !!strcmp(req->method, "HEAD"); break;
+			case PAIR('P', 4): req->method_id = XS_POST;    unknown_method = !!strcmp(req->method, "POST"); break;
+			case PAIR('P', 3): req->method_id = XS_PUT;     unknown_method = !!strcmp(req->method, "PUT"); 	break;
+			case PAIR('D', 6): req->method_id = XS_DELETE;  unknown_method = !!strcmp(req->method, "DELETE");  break;
+			case PAIR('C', 7): req->method_id = XS_CONNECT; unknown_method = !!strcmp(req->method, "CONNECT"); break;
+			case PAIR('O', 7): req->method_id = XS_OPTIONS; unknown_method = !!strcmp(req->method, "OPTIONS"); break;
+			case PAIR('T', 5): req->method_id = XS_TRACE;   unknown_method = !!strcmp(req->method, "TRACE"); break;
+			case PAIR('P', 5): req->method_id = XS_PATCH;   unknown_method = !!strcmp(req->method, "PATCH"); break;
+			default: unknown_method = 1; break;
+		}
 		#undef PAIR
 
 		if(unknown_method)
-			{
-				if(headers != NULL) free(headers);
-				return FAILURE("Unknown method");
-			}
+		{
+			if(headers != NULL) free(headers);
+			return FAILURE("Unknown method");
+		}
 	}
 
 	// Validate the HTTP version
 	{
 		_Bool bad_version = 0;
 		switch(version_length)
+		{
+			case sizeof("HTTP/M.N")-1:
+
+			if(!strcmp(str + version_offset, "HTTP/0.9"))
 			{
-				case sizeof("HTTP/M.N")-1:
-
-				if(!strcmp(str + version_offset, "HTTP/0.9"))
-					{
-						req->version_major = 0;
-						req->version_minor = 9;
-						break;
-					}
-
-				if(!strcmp(str + version_offset, "HTTP/1.0"))
-					{
-						req->version_major = 1;
-						req->version_minor = 0;
-						break;
-					}
-
-				if(!strcmp(str + version_offset, "HTTP/1.1"))
-					{
-						req->version_major = 1;
-						req->version_minor = 1;
-						break;
-					}
-
-				if(!strcmp(str + version_offset, "HTTP/2.0"))
-					{
-						req->version_major = 2;
-						req->version_minor = 0;
-						break;
-					}
-
-				if(!strcmp(str + version_offset, "HTTP/3.0"))
-					{
-						req->version_major = 3;
-						req->version_minor = 0;
-						break;
-					}
-				
-				bad_version = 1;	
-				break;
-
-				case sizeof("HTTP/M")-1:
-
-				if(!strcmp(str + version_offset, "HTTP/1"))
-					{
-						req->version_major = 1;
-						req->version_minor = 0;
-						break;
-					}
-
-				if(!strcmp(str + version_offset, "HTTP/2"))
-					{
-						req->version_major = 2;
-						req->version_minor = 0;
-						break;
-					}
-
-				if(!strcmp(str + version_offset, "HTTP/3"))
-					{
-						req->version_major = 3;
-						req->version_minor = 0;
-						break;
-					}
-
-				bad_version = 1;
-				break;
-
-				default:
-				bad_version = 1;
+				req->version_major = 0;
+				req->version_minor = 9;
 				break;
 			}
+
+			if(!strcmp(str + version_offset, "HTTP/1.0"))
+			{
+				req->version_major = 1;
+				req->version_minor = 0;
+				break;
+			}
+
+			if(!strcmp(str + version_offset, "HTTP/1.1"))
+			{
+				req->version_major = 1;
+				req->version_minor = 1;
+				break;
+			}
+
+			if(!strcmp(str + version_offset, "HTTP/2.0"))
+			{
+				req->version_major = 2;
+				req->version_minor = 0;
+				break;
+			}
+
+			if(!strcmp(str + version_offset, "HTTP/3.0"))
+			{
+				req->version_major = 3;
+				req->version_minor = 0;
+				break;
+			}
+			
+			bad_version = 1;	
+			break;
+
+			case sizeof("HTTP/M")-1:
+
+			if(!strcmp(str + version_offset, "HTTP/1"))
+			{
+				req->version_major = 1;
+				req->version_minor = 0;
+				break;
+			}
+
+			if(!strcmp(str + version_offset, "HTTP/2"))
+			{
+				req->version_major = 2;
+				req->version_minor = 0;
+				break;
+			}
+
+			if(!strcmp(str + version_offset, "HTTP/3"))
+			{
+				req->version_major = 3;
+				req->version_minor = 0;
+				break;
+			}
+
+			bad_version = 1;
+			break;
+
+			default:
+			bad_version = 1;
+			break;
+		}
 
 		if(bad_version)
-			{
-				if(headers != NULL) free(headers);
-				return FAILURE("Bad HTTP version");
-			}
+		{
+			if(headers != NULL) free(headers);
+			return FAILURE("Bad HTTP version");
+		}
 	}
 
 	return OK;
@@ -476,21 +476,21 @@ static _Bool upload(conn_t *conn)
 	total = conn->out.used;
 
 	while(sent < total)
+	{
+		int n = send(conn->fd, conn->out.data + sent, total - sent, 0);
+
+		if(n < 0)
 		{
-			int n = send(conn->fd, conn->out.data + sent, total - sent, 0);
+			if(errno == EAGAIN || errno == EWOULDBLOCK)
+				break;
 
-			if(n < 0)
-				{
-					if(errno == EAGAIN || errno == EWOULDBLOCK)
-						break;
-
-					// ERROR!
-					return 0;
-				}
-
-			assert(n >= 0);
-			sent += n;
+			// ERROR!
+			return 0;
 		}
+
+		assert(n >= 0);
+		sent += n;
+	}
 
 	memmove(conn->out.data, conn->out.data + sent, total - sent);
 	conn->out.used -= sent;
@@ -507,23 +507,23 @@ static uint32_t find(const char *str, uint32_t len, const char *seq)
 
 	uint32_t i = 0, seqlen = strlen(seq);
 	while(1)
-		{
-			while(i < len && str[i] != seq[0])
-				i += 1;
-
-			if(i == len)
-				return UINT32_MAX;
-
-			assert(str[i] == seq[0]);
-
-			if(i > len - seqlen)
-				return UINT32_MAX;
-
-			if(!strncmp(seq, str + i, seqlen))
-				return i;
-
+	{
+		while(i < len && str[i] != seq[0])
 			i += 1;
-		}
+
+		if(i == len)
+			return UINT32_MAX;
+
+		assert(str[i] == seq[0]);
+
+		if(i > len - seqlen)
+			return UINT32_MAX;
+
+		if(!strncmp(seq, str + i, seqlen))
+			return i;
+
+		i += 1;
+	}
 }
 
 static void append(conn_t *conn, const char *str, int len)
@@ -540,23 +540,23 @@ static void append(conn_t *conn, const char *str, int len)
 	assert(len > 0);
 
 	if(conn->out.size - conn->out.used < (uint32_t) len)
+	{
+		uint32_t new_size = 2 * conn->out.size;
+		
+		if(new_size < conn->out.used + (uint32_t) len)
+			new_size = conn->out.used + len;
+
+		void *temp = realloc(conn->out.data, new_size);
+
+		if(temp == NULL)
 		{
-			uint32_t new_size = 2 * conn->out.size;
-			
-			if(new_size < conn->out.used + (uint32_t) len)
-				new_size = conn->out.used + len;
-
-			void *temp = realloc(conn->out.data, new_size);
-
-			if(temp == NULL)
-				{
-					conn->failed_to_append = 1;
-					return;
-				}
-
-			conn->out.data = temp;
-			conn->out.size = new_size;
+			conn->failed_to_append = 1;
+			return;
 		}
+
+		conn->out.data = temp;
+		conn->out.size = new_size;
+	}
 
 	memcpy(conn->out.data + conn->out.used, str, len);
 	conn->out.used += len;
@@ -598,25 +598,25 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 			// No [Connection] header. No keep-alive.
 			keep_alive = 0;
 		else
-			{
-				// TODO: Make string comparisons case and whitespace insensitive.
-				if(!strcmp(h_connection, " Keep-Alive"))
-					keep_alive = 1;
-				else if(!strcmp(h_connection, " Close"))
-					keep_alive = 0;
-				else
-					keep_alive = 0;
-			}
+		{
+			// TODO: Make string comparisons case and whitespace insensitive.
+			if(!strcmp(h_connection, " Keep-Alive"))
+				keep_alive = 1;
+			else if(!strcmp(h_connection, " Close"))
+				keep_alive = 0;
+			else
+				keep_alive = 0;
+		}
 	}
 
 	_Bool head_only = conn->request.public.method_id == XS_HEAD;
 
 	if(head_only)
-		{
-			conn->request.public.method_id = XS_GET;
-			conn->request.public.method = "HEAD";
-			conn->request.public.method_len = sizeof("HEAD")-1;
-		}
+	{
+		conn->request.public.method_id = XS_GET;
+		conn->request.public.method = "HEAD";
+		conn->request.public.method_len = sizeof("HEAD")-1;
+	}
 
 	xs_response2 res;
 	xs_response_init(&res);
@@ -624,10 +624,10 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 	callback(&conn->request.public, (xs_response*) &res.public);
 
 	if(conn->request.public.headers != NULL)
-		{
-			free(conn->request.public.headers);
-			conn->request.public.headers = NULL;
-		}
+	{
+		free(conn->request.public.headers);
+		conn->request.public.headers = NULL;
+	}
 
 	if(res.public.close)
 		keep_alive = 0;
@@ -636,55 +636,55 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 	xs_hadd(&res.public, "Connection", keep_alive ? "Keep-Alive" : "Close");
 
 	if(res.failed)
-		{
-			// Failed to build the response. We'll send a 500.
-			append(conn, "HTTP/1.1 500 Internal Server Error\r\n", -1);
-			append(conn, keep_alive ? "Connection: Keep-Alive\r\n" : "Connection: Close\r\n", -1);
-		}
+	{
+		// Failed to build the response. We'll send a 500.
+		append(conn, "HTTP/1.1 500 Internal Server Error\r\n", -1);
+		append(conn, keep_alive ? "Connection: Keep-Alive\r\n" : "Connection: Close\r\n", -1);
+	}
 	else
+	{
+		char buffer[256];
+
+		int n = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d %s\r\n", res.public.status_code, res.public.status_text);
+		assert(n >= 0);
+
+		if((unsigned int) n > sizeof(buffer)-1)
+			n = sizeof(buffer)-1;
+
+		append(conn, buffer, n);
+
+		for(unsigned int i = 0; i < res.headerc; i += 1)
 		{
-			char buffer[256];
-
-			int n = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d %s\r\n", res.public.status_code, res.public.status_text);
-			assert(n >= 0);
-
-			if((unsigned int) n > sizeof(buffer)-1)
-				n = sizeof(buffer)-1;
-
-			append(conn, buffer, n);
-
-			for(unsigned int i = 0; i < res.headerc; i += 1)
-				{
-					append(conn, res.headers[i].name, res.headers[i].name_len);
-					append(conn, ": ", 2);
-					append(conn, res.headers[i].value, res.headers[i].value_len);
-					append(conn, "\r\n", 2);
-				}
-
+			append(conn, res.headers[i].name, res.headers[i].name_len);
+			append(conn, ": ", 2);
+			append(conn, res.headers[i].value, res.headers[i].value_len);
 			append(conn, "\r\n", 2);
-
-			if(head_only == 0 && res.public.body != NULL && res.public.body_len > 0)
-				append(conn, res.public.body, res.public.body_len);
 		}
+
+		append(conn, "\r\n", 2);
+
+		if(head_only == 0 && res.public.body != NULL && res.public.body_len > 0)
+			append(conn, res.public.body, res.public.body_len);
+	}
 
 	xs_response_deinit(&res);
 
 	conn->served += 1;
 
 	if(!upload(conn))
-		{
-			close_connection(conn, freelist, connum);
-			return 0;
-		}
+	{
+		close_connection(conn, freelist, connum);
+		return 0;
+	}
 
 	if(!keep_alive)
-		{
-			if(conn->out.used == 0)
-				close_connection(conn, freelist, connum);
-			else 
-				conn->close_when_uploaded = 1;
-			return 0;
-		}
+	{
+		if(conn->out.used == 0)
+			close_connection(conn, freelist, connum);
+		else 
+			conn->close_when_uploaded = 1;
+		return 0;
+	}
 
 	return 1;
 }
@@ -722,10 +722,10 @@ static uint32_t determine_content_length(xs_request *req)
 	k += 1;
 
 	while(is_digit(s[k]))
-		{
-			result = result * 10 + s[k] - '0';
-			k += 1;
-		}
+	{
+		result = result * 10 + s[k] - '0';
+		k += 1;
+	}
 
 	while(is_space(s[k]))
 		k += 1;
@@ -746,158 +746,158 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 		buffer_t *b = &conn->in;
 		uint32_t before = b->used;
 		while(1)
+		{
+			if(b->size - b->used < 128)
 			{
-				if(b->size - b->used < 128)
-					{
-						uint32_t new_size = (b->size == 0) ? 512 : (2 * b->size);
-					
-						void *temp = realloc(b->data, new_size);
+				uint32_t new_size = (b->size == 0) ? 512 : (2 * b->size);
+			
+				void *temp = realloc(b->data, new_size);
 
-						if(temp == NULL)
-							{
-								// ERROR!
-								close_connection(conn, freelist, connum);
-								return;
-							}
+				if(temp == NULL)
+				{
+					// ERROR!
+					close_connection(conn, freelist, connum);
+					return;
+				}
 
-						// TODO: Change the pointers in conn->request
-						//       if the head was already parsed.
-						
-						b->data = temp;
-						b->size = new_size;
-					}
-
-				int n = recv(conn->fd, b->data + b->used, b->size - b->used, 0);
-
-				if(n <= 0)
-					{
-						if(n == 0)
-							{
-								// Peer disconnected. 
-								close_connection(conn, freelist, connum);
-								return;
-							}
+				// TODO: Change the pointers in conn->request
+				//       if the head was already parsed.
 				
-						if(errno == EAGAIN || errno == EWOULDBLOCK)
-							break; // Done downloading.
-
-						// ERROR!
-						close_connection(conn, freelist, connum);
-						return;
-					}
-
-				b->used += n;
+				b->data = temp;
+				b->size = new_size;
 			}
+
+			int n = recv(conn->fd, b->data + b->used, b->size - b->used, 0);
+
+			if(n <= 0)
+			{
+				if(n == 0)
+				{
+					// Peer disconnected. 
+					close_connection(conn, freelist, connum);
+					return;
+				}
+		
+				if(errno == EAGAIN || errno == EWOULDBLOCK)
+					break; // Done downloading.
+
+				// ERROR!
+				close_connection(conn, freelist, connum);
+				return;
+			}
+
+			b->used += n;
+		}
 		downloaded = b->used - before;
 	}
 
 	int served = 0;
 
 	while(1)
+	{
+		if(!conn->head_received)
 		{
-			if(!conn->head_received)
+			// Search for an \r\n\r\n.
+			uint32_t i;
+			{
+				uint32_t start = 0;
+				if(served == 0 && conn->in.used > downloaded + 3)
+					start = conn->in.used - downloaded - 3;
+
+				i = find(conn->in.data + start, conn->in.used - start, "\r\n\r\n");
+
+				if(i == UINT32_MAX)
+					// No \r\n\r\n found. The head of the request wasn't fully received yet.
+					return;
+					
+				// i is relative to start.
+				i += start;
+			}
+
+			struct parse_err_t err = parse(conn->in.data, i+4, &conn->request.public);
+
+			uint32_t len = 0; // Anything other than UINT32_MAX goes.
+			if(err.msg == NULL)
+				len = determine_content_length(&conn->request.public); // Returns UINT32_MAX on failure.
+
+			if(err.msg != NULL || len == UINT32_MAX)
+			{
+				char buffer[512];
+				if(len == UINT32_MAX)
 				{
-					// Search for an \r\n\r\n.
-					uint32_t i;
-					{
-						uint32_t start = 0;
-						if(served == 0 && conn->in.used > downloaded + 3)
-							start = conn->in.used - downloaded - 3;
-
-						i = find(conn->in.data + start, conn->in.used - start, "\r\n\r\n");
-
-						if(i == UINT32_MAX)
-							// No \r\n\r\n found. The head of the request wasn't fully received yet.
-							return;
-						
-						// i is relative to start.
-						i += start;
-					}
-
-					struct parse_err_t err = parse(conn->in.data, i+4, &conn->request.public);
-
-					uint32_t len = 0; // Anything other than UINT32_MAX goes.
-					if(err.msg == NULL)
-						len = determine_content_length(&conn->request.public); // Returns UINT32_MAX on failure.
-
-					if(err.msg != NULL || len == UINT32_MAX)
-						{
-							char buffer[512];
-							if(len == UINT32_MAX)
-								{
-									static const char msg[] = "Couldn't determine the content length";
-									(void) snprintf(buffer, sizeof(buffer), 
-										"HTTP/1.1 400 Bad Request\r\n"
-										"Content-Type: text/plain;charset=utf-8\r\n"
-										"Content-Length: %ld\r\n"
-										"Connection: Close\r\n"
-										"\r\n%s", sizeof(msg)-1, msg);
-								}
-							else if(err.internal)
-								{
-									(void) snprintf(buffer, sizeof(buffer), 
-										"HTTP/1.1 500 Internal Server Error\r\n"
-										"Content-Type: text/plain;charset=utf-8\r\n"
-										"Content-Length: %d\r\n"
-										"Connection: Close\r\n"
-										"\r\n%s", err.len, err.msg);
-								}
-							else
-								{
-									// 400 Bad Request.
-									(void) snprintf(buffer, sizeof(buffer), 
-										"HTTP/1.1 400 Bad Request\r\n"
-										"Content-Type: text/plain;charset=utf-8\r\n"
-										"Content-Length: %d\r\n"
-										"Connection: Close\r\n"
-										"\r\n%s", err.len, err.msg);
-								}
-
-							// NOTE: If the static buffer [buffer] is too small
-							//       to hold the response then the response will
-							//       be sent truncated. But that's not a problem
-							//       since we'll close the connection after this
-							//       response either way. 
-
-							append(conn, buffer, -1);
-
-							conn->close_when_uploaded = 1;
-
-							if(!upload(conn))
-								{
-									// The socket wasn't found blocking
-									// so the upload started, but then
-									// it failed.
-									close_connection(conn, freelist, connum);
-									return;
-								}
-
-							if(conn->out.used == 0)
-								close_connection(conn, freelist, connum);
-							return;
-						}
-
-					conn->head_received = 1;
-					conn->body_offset = i + 4;
-					conn->body_length = len;
+					static const char msg[] = "Couldn't determine the content length";
+					(void) snprintf(buffer, sizeof(buffer), 
+						"HTTP/1.1 400 Bad Request\r\n"
+						"Content-Type: text/plain;charset=utf-8\r\n"
+						"Content-Length: %ld\r\n"
+						"Connection: Close\r\n"
+						"\r\n%s", sizeof(msg)-1, msg);
+				}
+				else if(err.internal)
+				{
+					(void) snprintf(buffer, sizeof(buffer), 
+						"HTTP/1.1 500 Internal Server Error\r\n"
+						"Content-Type: text/plain;charset=utf-8\r\n"
+						"Content-Length: %d\r\n"
+						"Connection: Close\r\n"
+						"\r\n%s", err.len, err.msg);
+				}
+				else
+				{
+					// 400 Bad Request.
+					(void) snprintf(buffer, sizeof(buffer), 
+						"HTTP/1.1 400 Bad Request\r\n"
+						"Content-Type: text/plain;charset=utf-8\r\n"
+						"Content-Length: %d\r\n"
+						"Connection: Close\r\n"
+						"\r\n%s", err.len, err.msg);
 				}
 
-			if(!conn->head_received || conn->body_offset + conn->body_length > conn->in.used)
-				// The rest of the body didn't arrive yet.
+				// NOTE: If the static buffer [buffer] is too small
+				//       to hold the response then the response will
+				//       be sent truncated. But that's not a problem
+				//       since we'll close the connection after this
+				//       response either way. 
+
+				append(conn, buffer, -1);
+
+				conn->close_when_uploaded = 1;
+
+				if(!upload(conn))
+				{
+					// The socket wasn't found blocking
+					// so the upload started, but then
+					// it failed.
+					close_connection(conn, freelist, connum);
+					return;
+				}
+
+				if(conn->out.used == 0)
+					close_connection(conn, freelist, connum);
 				return;
+			}
 
-			if(!respond(conn, freelist, connum, callback))
-				return;
-
-			// Remove the request from the input buffer by
-			// copying back its remaining contents.
-			uint32_t consumed = conn->body_offset + conn->body_length;
-			memmove(conn->in.data, conn->in.data + consumed, conn->in.used - consumed);
-			conn->in.used -= consumed;
-			conn->head_received = 0;
-
-			served += 1;
+			conn->head_received = 1;
+			conn->body_offset = i + 4;
+			conn->body_length = len;
 		}
+
+		if(!conn->head_received || conn->body_offset + conn->body_length > conn->in.used)
+			// The rest of the body didn't arrive yet.
+			return;
+
+		if(!respond(conn, freelist, connum, callback))
+			return;
+
+		// Remove the request from the input buffer by
+		// copying back its remaining contents.
+		uint32_t consumed = conn->body_offset + conn->body_length;
+		memmove(conn->in.data, conn->in.data + consumed, conn->in.used - consumed);
+		conn->in.used -= consumed;
+		conn->head_received = 0;
+
+		served += 1;
+	}
 }
 
 void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, unsigned int maxconns, _Bool reuse)
@@ -907,23 +907,23 @@ void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, u
 		fd = socket(AF_INET, SOCK_STREAM, 0);
 
 		if(fd < 0)
-			{
-				// ERROR!
-				fprintf(stderr, "Failed to create socket\n");
-				return;
-			}
+		{
+			// ERROR!
+			fprintf(stderr, "Failed to create socket\n");
+			return;
+		}
 
 		if(reuse)
+		{
+			int v = 1;
+			if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(v)))
 			{
-				int v = 1;
-				if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(v)))
-					{
-						// ERROR: Failed to set socket option.
-						fprintf(stderr, "Failed to set socket option\n");
-						(void) close(fd);
-						return;
-					}
+				// ERROR: Failed to set socket option.
+				fprintf(stderr, "Failed to set socket option\n");
+				(void) close(fd);
+				return;
 			}
+		}
 
 		struct sockaddr_in temp;
 		memset(&temp, 0, sizeof(temp));
@@ -931,20 +931,20 @@ void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, u
 		temp.sin_port = htons(port);
 		temp.sin_addr.s_addr = INADDR_ANY;
 		if(bind(fd, (struct sockaddr*) &temp, sizeof(temp)))
-			{
-				// ERROR!
-				fprintf(stderr, "Failed to bind to address\n");
-				(void) close(fd);
-				return;
-			}
+		{
+			// ERROR!
+			fprintf(stderr, "Failed to bind to address\n");
+			(void) close(fd);
+			return;
+		}
 
 		if(listen(fd, 32))
-			{
-				// ERROR!
-				fprintf(stderr, "Failed to listen for connections\n");
-				(void) close(fd);
-				return;
-			}
+		{
+			// ERROR!
+			fprintf(stderr, "Failed to listen for connections\n");
+			(void) close(fd);
+			return;
+		}
 	}
 
 	int epfd;
@@ -952,24 +952,24 @@ void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, u
 		epfd = epoll_create1(0);
 
 		if(epfd < 0)
-			{
-				// ERROR!
-				fprintf(stderr, "Failed to create epoll\n");
-				(void) close(fd);
-				return;
-			}
+		{
+			// ERROR!
+			fprintf(stderr, "Failed to create epoll\n");
+			(void) close(fd);
+			return;
+		}
 
 		struct epoll_event temp;
 		temp.events = EPOLLIN;
 		temp.data.ptr = NULL;
 		if(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp))
-			{
-				// ERROR!
-				fprintf(stderr, "Failed to add listener to epoll\n");
-				(void) close(fd);
-				(void) close(epfd);
-				return;
-			}
+		{
+			// ERROR!
+			fprintf(stderr, "Failed to add listener to epoll\n");
+			(void) close(fd);
+			(void) close(epfd);
+			return;
+		}
 	}
 
 	conn_t *pool, *freelist;
@@ -977,20 +977,20 @@ void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, u
 		pool = malloc(maxconns * sizeof(conn_t));
 
 		if(pool == NULL)
-			{
-				fprintf(stderr, "Failed to allocate connection pool\n");
-				(void) close(fd);
-				(void) close(epfd);
-				return;
-			}
+		{
+			fprintf(stderr, "Failed to allocate connection pool\n");
+			(void) close(fd);
+			(void) close(epfd);
+			return;
+		}
 
 		pool[0].prev = NULL;
 
 		for(unsigned int i = 0; i < maxconns; i += 1)
-			{
-				pool[i].next = pool + i + 1;
-				pool[i].prev = NULL;
-			}
+		{
+			pool[i].next = pool + i + 1;
+			pool[i].prev = NULL;
+		}
 
 		pool[maxconns-1].next = NULL;
 
@@ -1002,52 +1002,52 @@ void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, u
 	struct epoll_event events[64];
 
 	while(1)
+	{
+		int num = epoll_wait(epfd, events, sizeof(events)/sizeof(events[0]), 5000);
+
+		for(int i = 0; i < num; i += 1)
 		{
-			int num = epoll_wait(epfd, events, sizeof(events)/sizeof(events[0]), 5000);
+			if(events[i].data.ptr == NULL)
+			{
+				// New connection.
+				assert(events[i].events == EPOLLIN);
+				accept_connection(fd, epfd, &freelist, &connum);
+				continue;
+			}
 
-			for(int i = 0; i < num; i += 1)
+			conn_t *conn = events[i].data.ptr;
+
+			if(events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
+			{
+				// Error or disconnection.
+				close_connection(conn, &freelist, &connum);
+				continue;
+			}
+
+			if(events[i].events & EPOLLOUT)
+			{
+				if(!upload(conn))
 				{
-					if(events[i].data.ptr == NULL)
-						{
-							// New connection.
-							assert(events[i].events == EPOLLIN);
-							accept_connection(fd, epfd, &freelist, &connum);
-							continue;
-						}
-
-					conn_t *conn = events[i].data.ptr;
-
-					if(events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
-						{
-							// Error or disconnection.
-							close_connection(conn, &freelist, &connum);
-							continue;
-						}
-
-					if(events[i].events & EPOLLOUT)
-						{
-							if(!upload(conn))
-								{
-									close_connection(conn, &freelist, &connum);
-									continue;
-								}
-
-							if(conn->out.used == 0 && conn->close_when_uploaded)
-								{
-									close_connection(conn, &freelist, &connum);
-									continue;
-								}
-						}
-
-					if((events[i].events & (EPOLLIN | EPOLLPRI)) && conn->close_when_uploaded == 0)
-						{
-							// Note that this may close the connection. If any logic
-						    // were to come after this function, it couldn't refer
-						    // to the connection structure.
-							when_data_is_ready_to_be_read(conn, &freelist, &connum, callback); 
-						}
+					close_connection(conn, &freelist, &connum);
+					continue;
 				}
+
+				if(conn->out.used == 0 && conn->close_when_uploaded)
+				{
+					close_connection(conn, &freelist, &connum);
+					continue;
+				}
+			}
+
+			if((events[i].events & (EPOLLIN | EPOLLPRI)) && conn->close_when_uploaded == 0)
+			{
+				// Note that this may close the connection. If any logic
+			    // were to come after this function, it couldn't refer
+			    // to the connection structure.
+				when_data_is_ready_to_be_read(conn, &freelist, &connum, callback); 
+			}
 		}
+	}
 }
 
 static int find_header(xs_header *headers, int count, const char *name)
@@ -1081,18 +1081,18 @@ void xs_hadd(xs_response *res, const char *name, const char *valfmt, ...)
 		va_end(args);
 
 		if(n < 0)
-			{
-				// Bad format.
-				res2->failed = 1;
-				return;
-			}
+		{
+			// Bad format.
+			res2->failed = 1;
+			return;
+		}
 
 		if((unsigned int) n >= sizeof(value))
-			{
-				// Static buffer is too small.
-				res2->failed = 1;
-				return;
-			}
+		{
+			// Static buffer is too small.
+			res2->failed = 1;
+			return;
+		}
 
 		value_len = n;
 	}
@@ -1103,11 +1103,11 @@ void xs_hadd(xs_response *res, const char *name, const char *valfmt, ...)
 		void *mem = malloc(name_len + value_len + 2);
 
 		if(mem == NULL)
-			{
-				// ERROR!
-				res2->failed = 1;
-				return;
-			}
+		{
+			// ERROR!
+			res2->failed = 1;
+			return;
+		}
 
 		name2  = (char*) mem;
 		value2 = (char*) mem + name_len + 1;
@@ -1117,40 +1117,40 @@ void xs_hadd(xs_response *res, const char *name, const char *valfmt, ...)
 	}
 
 	if(i < 0)
-		{
-			if(res2->headerc == res2->capacity)
+	{
+		if(res2->headerc == res2->capacity)
+			{
+				int new_capacity = res2->capacity == 0 ? 8 : res2->capacity * 2;
+
+				void *tmp = realloc(res2->headers, new_capacity * sizeof(xs_header));
+
+				if(tmp == NULL)
 				{
-					int new_capacity = res2->capacity == 0 ? 8 : res2->capacity * 2;
-
-					void *tmp = realloc(res2->headers, new_capacity * sizeof(xs_header));
-
-					if(tmp == NULL)
-						{
-							// ERROR!
-							res2->failed = 1;
-							free(name2);
-							return;
-						}
-
-					res2->public.headers = tmp;
-					res2->headers = tmp;
-					res2->capacity = new_capacity;
+					// ERROR!
+					res2->failed = 1;
+					free(name2);
+					return;
 				}
 
-			res2->headers[res2->headerc] = (xs_header) { 
-				.name = name2, .value = value2, 
-				.name_len = name_len, .value_len = value_len };
+				res2->public.headers = tmp;
+				res2->headers = tmp;
+				res2->capacity = new_capacity;
+			}
 
-			res2->headerc += 1;
-			res2->public.headerc = res2->headerc;
-		}
+		res2->headers[res2->headerc] = (xs_header) { 
+			.name = name2, .value = value2, 
+			.name_len = name_len, .value_len = value_len };
+
+		res2->headerc += 1;
+		res2->public.headerc = res2->headerc;
+	}
 	else
-		{
-			free(res2->headers[i].name);
-			res2->headers[i] = (xs_header) { 
-				.name = name2, .value = value2, 
-				.name_len = name_len, .value_len = value_len };
-		}
+	{
+		free(res2->headers[i].name);
+		res2->headers[i] = (xs_header) { 
+			.name = name2, .value = value2, 
+			.name_len = name_len, .value_len = value_len };
+	}
 }
 
 void xs_hrem(xs_response *res, const char *name)
@@ -1189,16 +1189,16 @@ const char *xs_hget(void *req_or_res, const char *name)
 		struct_type_t type = ((xs_request2*) ((char*) req_or_res - offsetof(xs_request2, public)))->type;
 
 		if(type == XS_REQ)
-			{
-				headers = ((xs_request*) req_or_res)->headers;
-				headerc = ((xs_request*) req_or_res)->headerc;
-			}
+		{
+			headers = ((xs_request*) req_or_res)->headers;
+			headerc = ((xs_request*) req_or_res)->headerc;
+		}
 		else
-			{
-				assert(type == XS_RES);
-				headers = ((xs_response*) req_or_res)->headers;
-				headerc = ((xs_response*) req_or_res)->headerc;
-			}
+		{
+			assert(type == XS_RES);
+			headers = ((xs_response*) req_or_res)->headers;
+			headerc = ((xs_response*) req_or_res)->headerc;
+		}
 	}
 
 	int i = find_header(headers, headerc, name);
