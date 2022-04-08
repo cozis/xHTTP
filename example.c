@@ -1,3 +1,4 @@
+
 // build with:
 //   $ gcc example.c xserver.c -o example -Wall -Wextra -g
 
@@ -7,16 +8,12 @@
 static void callback(xs_request *req, xs_response *res)
 {
 	(void) req;
-
-	static const char body[] = "Hello, world!";
-
 	res->status_code = 200;
 	res->status_text = "OK";
-	res->body = body;
-	res->body_len = sizeof(body)-1;
-
 	xs_hadd(res, "Content-Type", "text/plain;charset=utf-8");
 	xs_hadd(res, "Content-Language", "en-US");
+	res->body = "Hello, world!";
+	res->body_len = sizeof("Hello, world!")-1;
 }
 
 int main()

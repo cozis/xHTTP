@@ -60,6 +60,9 @@ static _Bool set_non_blocking(int fd)
 	return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
+/* Accepts a connection from [fd], creates a connection
+ * struct for it and registers it with the epoll.
+ */
 static void accept_connection(int fd, int epfd, conn_t **freelist, int *connum)
 {
 	int cfd = accept(fd, NULL, NULL);
@@ -169,8 +172,6 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 	#define INTERNAL_FAILURE(msg_) \
 		((struct parse_err_t) { .internal = 1, .msg = msg_, .len = sizeof(msg_)-1 })
 
-
-
 	if(len == 0)
 		return FAILURE("Empty request");
 
@@ -189,10 +190,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 		return FAILURE("Missing URL and HTTP version");
 
 	if(!is_space(str[i]))
-		{
-			printf("C = [%c] (%d) at offset %d\n", str[i], str[i], i);
-			return FAILURE("Bad character after method. Methods can only have uppercase alphabetic characters");
-		}
+		return FAILURE("Bad character after method. Methods can only have uppercase alphabetic characters");
 
 	skip(str, len, &i, 0, is_space);
 
@@ -545,8 +543,8 @@ static void append(conn_t *conn, const char *str, int len)
 		{
 			uint32_t new_size = 2 * conn->out.size;
 			
-			if(new_size < (uint32_t) len)
-				new_size = len;
+			if(new_size < conn->out.used + (uint32_t) len)
+				new_size = conn->out.used + len;
 
 			void *temp = realloc(conn->out.data, new_size);
 
@@ -725,7 +723,7 @@ static uint32_t determine_content_length(xs_request *req)
 
 	while(is_digit(s[k]))
 		{
-			result += result * 10 + s[k] - '0';
+			result = result * 10 + s[k] - '0';
 			k += 1;
 		}
 
