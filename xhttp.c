@@ -11,23 +11,23 @@
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
-#include "xserver.h"
+#include "xhttp.h"
 
-typedef enum { XS_REQ, XS_RES } struct_type_t;
+typedef enum { XH_REQ, XH_RES } struct_type_t;
 
 typedef struct {
 	struct_type_t    type;
-	xs_response    public;
-	xs_header    *headers;
+	xh_response    public;
+	xh_header    *headers;
 	unsigned int  headerc;
 	unsigned int capacity;
 	_Bool failed;
-} xs_response2;
+} xh_response2;
 
 typedef struct {
 	struct_type_t type;
-	xs_request  public;
-} xs_request2;
+	xh_request  public;
+} xh_request2;
 
 typedef struct {
 	char    *data;
@@ -47,7 +47,7 @@ struct conn_t {
 	_Bool head_received;
 	uint32_t body_offset;
     uint32_t body_length;
-    xs_request2  request;
+    xh_request2  request;
 };
 
 static _Bool set_non_blocking(int fd)
@@ -88,7 +88,7 @@ static void accept_connection(int fd, int epfd, conn_t **freelist, int *connum)
 
 	memset(conn, 0, sizeof(conn_t));
 	conn->fd = cfd;
-	conn->request.type = XS_REQ;
+	conn->request.type = XH_REQ;
 
 	struct epoll_event buffer;
 	buffer.events = EPOLLET | EPOLLIN | EPOLLPRI | EPOLLOUT | EPOLLRDHUP;
@@ -161,7 +161,7 @@ struct parse_err_t {
 	unsigned int len; 
 };
 
-static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
+static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 {
 	#define OK \
 		((struct parse_err_t) { .internal = 0, .msg = NULL})
@@ -240,7 +240,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 	i += 1; // Skip the \n.
 
 	int capacity = 0, headerc = 0;
-	xs_header *headers = NULL;
+	xh_header *headers = NULL;
 
 	while(1)
 	{
@@ -315,7 +315,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 		{
 			int new_capacity = capacity == 0 ? 8 : capacity * 2;
 
-			void *temp = realloc(headers, new_capacity * sizeof(xs_header));
+			void *temp = realloc(headers, new_capacity * sizeof(xh_header));
 		
 			if(temp == NULL)
 			{
@@ -327,7 +327,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 			headers = temp;
 		}
 
-		headers[headerc++] = (xs_header) { 
+		headers[headerc++] = (xh_header) { 
 			.name      = str + hname_offset, 
 			.name_len  =       hname_length,
 			.value     = str + hvalue_offset, 
@@ -355,15 +355,15 @@ static struct parse_err_t parse(char *str, uint32_t len, xs_request *req)
 		#define PAIR(p, q) (uint64_t) (((uint64_t) p << 32) | (uint64_t) q)
 		switch(PAIR(req->method[0], method_length))
 		{
-			case PAIR('G', 3): req->method_id = XS_GET;     unknown_method = !!strcmp(req->method, "GET"); 	break;
-			case PAIR('H', 4): req->method_id = XS_HEAD;    unknown_method = !!strcmp(req->method, "HEAD"); break;
-			case PAIR('P', 4): req->method_id = XS_POST;    unknown_method = !!strcmp(req->method, "POST"); break;
-			case PAIR('P', 3): req->method_id = XS_PUT;     unknown_method = !!strcmp(req->method, "PUT"); 	break;
-			case PAIR('D', 6): req->method_id = XS_DELETE;  unknown_method = !!strcmp(req->method, "DELETE");  break;
-			case PAIR('C', 7): req->method_id = XS_CONNECT; unknown_method = !!strcmp(req->method, "CONNECT"); break;
-			case PAIR('O', 7): req->method_id = XS_OPTIONS; unknown_method = !!strcmp(req->method, "OPTIONS"); break;
-			case PAIR('T', 5): req->method_id = XS_TRACE;   unknown_method = !!strcmp(req->method, "TRACE"); break;
-			case PAIR('P', 5): req->method_id = XS_PATCH;   unknown_method = !!strcmp(req->method, "PATCH"); break;
+			case PAIR('G', 3): req->method_id = XH_GET;     unknown_method = !!strcmp(req->method, "GET"); 	break;
+			case PAIR('H', 4): req->method_id = XH_HEAD;    unknown_method = !!strcmp(req->method, "HEAD"); break;
+			case PAIR('P', 4): req->method_id = XH_POST;    unknown_method = !!strcmp(req->method, "POST"); break;
+			case PAIR('P', 3): req->method_id = XH_PUT;     unknown_method = !!strcmp(req->method, "PUT"); 	break;
+			case PAIR('D', 6): req->method_id = XH_DELETE;  unknown_method = !!strcmp(req->method, "DELETE");  break;
+			case PAIR('C', 7): req->method_id = XH_CONNECT; unknown_method = !!strcmp(req->method, "CONNECT"); break;
+			case PAIR('O', 7): req->method_id = XH_OPTIONS; unknown_method = !!strcmp(req->method, "OPTIONS"); break;
+			case PAIR('T', 5): req->method_id = XH_TRACE;   unknown_method = !!strcmp(req->method, "TRACE"); break;
+			case PAIR('P', 5): req->method_id = XH_PATCH;   unknown_method = !!strcmp(req->method, "PATCH"); break;
 			default: unknown_method = 1; break;
 		}
 		#undef PAIR
@@ -563,7 +563,7 @@ static void append(conn_t *conn, const char *str, int len)
 	return;
 }
 
-static void xs_response_init(xs_response2 *res)
+static void xh_response_init(xh_response2 *res)
 {
 	res->public.status_code = -1;
 	res->public.status_text = NULL;
@@ -572,14 +572,14 @@ static void xs_response_init(xs_response2 *res)
 	res->public.body = NULL;
 	res->public.body_len = 0;
 	res->public.close = 0;
-	res->type = XS_RES;
+	res->type = XH_RES;
 	res->headers = NULL;
 	res->headerc = 0;
 	res->capacity = 0;
 	res->failed = 0;
 }
 
-static void xs_response_deinit(xs_response2 *res)
+static void xh_response_deinit(xh_response2 *res)
 {
 	for(unsigned int i = 0; i < res->headerc; i += 1)
 		free(res->headers[i].name);
@@ -588,11 +588,11 @@ static void xs_response_deinit(xs_response2 *res)
 		free(res->headers);
 }
 
-static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callback)(xs_request*, xs_response*))
+static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callback)(xh_request*, xh_response*))
 {
 	_Bool keep_alive;
 	{
-		const char *h_connection = xs_hget(&conn->request.public, "Connection");
+		const char *h_connection = xh_hget(&conn->request.public, "Connection");
 
 		if(h_connection == NULL)
 			// No [Connection] header. No keep-alive.
@@ -609,19 +609,19 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 		}
 	}
 
-	_Bool head_only = conn->request.public.method_id == XS_HEAD;
+	_Bool head_only = conn->request.public.method_id == XH_HEAD;
 
 	if(head_only)
 	{
-		conn->request.public.method_id = XS_GET;
+		conn->request.public.method_id = XH_GET;
 		conn->request.public.method = "HEAD";
 		conn->request.public.method_len = sizeof("HEAD")-1;
 	}
 
-	xs_response2 res;
-	xs_response_init(&res);
+	xh_response2 res;
+	xh_response_init(&res);
 
-	callback(&conn->request.public, (xs_response*) &res.public);
+	callback(&conn->request.public, (xh_response*) &res.public);
 
 	if(conn->request.public.headers != NULL)
 	{
@@ -632,8 +632,8 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 	if(res.public.close)
 		keep_alive = 0;
 
-	xs_hadd(&res.public, "Content-Length", "%d", res.public.body_len);
-	xs_hadd(&res.public, "Connection", keep_alive ? "Keep-Alive" : "Close");
+	xh_hadd(&res.public, "Content-Length", "%d", res.public.body_len);
+	xh_hadd(&res.public, "Connection", keep_alive ? "Keep-Alive" : "Close");
 
 	if(res.failed)
 	{
@@ -667,7 +667,7 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 			append(conn, res.public.body, res.public.body_len);
 	}
 
-	xs_response_deinit(&res);
+	xh_response_deinit(&res);
 
 	conn->served += 1;
 
@@ -689,7 +689,7 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 	return 1;
 }
 
-static uint32_t determine_content_length(xs_request *req)
+static uint32_t determine_content_length(xh_request *req)
 {
 	unsigned int i;
 	for(i = 0; i < req->headerc; i += 1)
@@ -738,7 +738,7 @@ static uint32_t determine_content_length(xs_request *req)
 	return result;
 }
 
-static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *connum, void (*callback)(xs_request*, xs_response*))
+static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *connum, void (*callback)(xh_request*, xh_response*))
 {
 	// Download the data in the input buffer.
 	uint32_t downloaded;
@@ -900,7 +900,7 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 	}
 }
 
-void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, unsigned int maxconns, _Bool reuse)
+void xhttp(void (*callback)(xh_request*, xh_response*), unsigned short port, unsigned int maxconns, _Bool reuse)
 {
 	int fd;
 	{
@@ -1050,17 +1050,17 @@ void xserver(void (*callback)(xs_request*, xs_response*), unsigned short port, u
 	}
 }
 
-static int find_header(xs_header *headers, int count, const char *name)
+static int find_header(xh_header *headers, int count, const char *name)
 {
 	for(int i = 0; i < count; i += 1)
-		if(xs_hcmp(name, headers[i].name))
+		if(xh_hcmp(name, headers[i].name))
 			return i;
 	return -1;
 }
 
-void xs_hadd(xs_response *res, const char *name, const char *valfmt, ...)
+void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
 {
-	xs_response2 *res2 = (xs_response2*) ((char*) res - offsetof(xs_response2, public));
+	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
 
 	assert(&res2->public == res);
 
@@ -1122,7 +1122,7 @@ void xs_hadd(xs_response *res, const char *name, const char *valfmt, ...)
 			{
 				int new_capacity = res2->capacity == 0 ? 8 : res2->capacity * 2;
 
-				void *tmp = realloc(res2->headers, new_capacity * sizeof(xs_header));
+				void *tmp = realloc(res2->headers, new_capacity * sizeof(xh_header));
 
 				if(tmp == NULL)
 				{
@@ -1137,7 +1137,7 @@ void xs_hadd(xs_response *res, const char *name, const char *valfmt, ...)
 				res2->capacity = new_capacity;
 			}
 
-		res2->headers[res2->headerc] = (xs_header) { 
+		res2->headers[res2->headerc] = (xh_header) { 
 			.name = name2, .value = value2, 
 			.name_len = name_len, .value_len = value_len };
 
@@ -1147,15 +1147,15 @@ void xs_hadd(xs_response *res, const char *name, const char *valfmt, ...)
 	else
 	{
 		free(res2->headers[i].name);
-		res2->headers[i] = (xs_header) { 
+		res2->headers[i] = (xh_header) { 
 			.name = name2, .value = value2, 
 			.name_len = name_len, .value_len = value_len };
 	}
 }
 
-void xs_hrem(xs_response *res, const char *name)
+void xh_hrem(xh_response *res, const char *name)
 {
-	xs_response2 *res2 = (xs_response2*) ((char*) res - offsetof(xs_response2, public));
+	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
 
 	assert(&res2->public == res);
 
@@ -1178,26 +1178,26 @@ void xs_hrem(xs_response *res, const char *name)
 	res2->public.headerc -= 1;
 }
 
-const char *xs_hget(void *req_or_res, const char *name)
+const char *xh_hget(void *req_or_res, const char *name)
 {
-	xs_header   *headers;
+	xh_header   *headers;
 	unsigned int headerc;
 
 	{
-		_Static_assert(offsetof(xs_response2, public) == offsetof(xs_request2, public));
+		_Static_assert(offsetof(xh_response2, public) == offsetof(xh_request2, public));
 
-		struct_type_t type = ((xs_request2*) ((char*) req_or_res - offsetof(xs_request2, public)))->type;
+		struct_type_t type = ((xh_request2*) ((char*) req_or_res - offsetof(xh_request2, public)))->type;
 
-		if(type == XS_REQ)
+		if(type == XH_REQ)
 		{
-			headers = ((xs_request*) req_or_res)->headers;
-			headerc = ((xs_request*) req_or_res)->headerc;
+			headers = ((xh_request*) req_or_res)->headers;
+			headerc = ((xh_request*) req_or_res)->headerc;
 		}
 		else
 		{
-			assert(type == XS_RES);
-			headers = ((xs_response*) req_or_res)->headers;
-			headerc = ((xs_response*) req_or_res)->headerc;
+			assert(type == XH_RES);
+			headers = ((xh_response*) req_or_res)->headers;
+			headerc = ((xh_response*) req_or_res)->headerc;
 		}
 	}
 
@@ -1209,7 +1209,7 @@ const char *xs_hget(void *req_or_res, const char *name)
 	return headers[i].value;
 }
 
-_Bool xs_hcmp(const char *a, const char *b)
+_Bool xh_hcmp(const char *a, const char *b)
 {
 	if(a == NULL || b == NULL)
 		return a == b;
