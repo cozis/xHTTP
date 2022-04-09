@@ -14,7 +14,7 @@
 #include "xhttp.h"
 
 /* OVERVIEW
- * 
+ *
  */
 
 typedef enum { XH_REQ, XH_RES } struct_type_t;
@@ -77,7 +77,7 @@ typedef struct {
  *           each header's name is made using [xh_hcmp],
  *           so it's not case-sensitive.
  *
- * Returns: 
+ * Returns:
  *   The index in the array of the matched header, or
  *   -1 is no header was found.
  */
@@ -105,13 +105,13 @@ static int find_header(xh_header *headers, int count, const char *name)
  *   - valfmt: A printf-like format string that evaluates
  *             to the header's value.
  *
- * Returns: 
- *   Nothing. The header may or may not be added 
+ * Returns:
+ *   Nothing. The header may or may not be added
  *   (or replaced) to the request.
  *
  * Notes:
  *
- *   - The name "xh_hadd" stands for "XHttp 
+ *   - The name "xh_hadd" stands for "XHttp
  *     Header ADD".
  */
 void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
@@ -167,7 +167,7 @@ void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
 
 		name2  = (char*) mem;
 		value2 = (char*) mem + name_len + 1;
-	
+
 		strcpy(name2, name);
 		strcpy(value2, value);
 	}
@@ -193,8 +193,8 @@ void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
 				res2->capacity = new_capacity;
 			}
 
-		res2->headers[res2->headerc] = (xh_header) { 
-			.name = name2, .value = value2, 
+		res2->headers[res2->headerc] = (xh_header) {
+			.name = name2, .value = value2,
 			.name_len = name_len, .value_len = value_len };
 
 		res2->headerc += 1;
@@ -203,8 +203,8 @@ void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
 	else
 	{
 		free(res2->headers[i].name);
-		res2->headers[i] = (xh_header) { 
-			.name = name2, .value = value2, 
+		res2->headers[i] = (xh_header) {
+			.name = name2, .value = value2,
 			.name_len = name_len, .value_len = value_len };
 	}
 }
@@ -223,12 +223,12 @@ void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
  *           each header's name is made using [xh_hcmp],
  *           so it's not case-sensitive.
  *
- * Returns: 
+ * Returns:
  *   Nothing.
  *
  * Notes:
  *
- *   - The name "xh_hrem" stands for "XHttp 
+ *   - The name "xh_hrem" stands for "XHttp
  *     Header REMove".
  */
 void xh_hrem(xh_response *res, const char *name)
@@ -273,14 +273,14 @@ void xh_hrem(xh_response *res, const char *name)
  *           each header's name is made using [xh_hcmp],
  *           so it's not case-sensitive.
  *
- * Returns: 
+ * Returns:
  *   A zero-terminated string containing the value of
  *   the header or NULL if the header isn't contained
  *   in the request/response.
  *
  * Notes:
  *
- *   - The name "xh_hget" stands for "XHttp 
+ *   - The name "xh_hget" stands for "XHttp
  *     Header GET".
  *
  *   - The returned value is invalidated if
@@ -330,11 +330,11 @@ const char *xh_hget(void *req_or_res, const char *name)
  *   - b: Zero-terminated string that contains
  *        the second header's name.
  *
- * Returns: 
+ * Returns:
  *   1 if the header names match, 0 otherwise.
  *
  * Notes:
- *   - The name "xh_hcmp" stands for "XHttp 
+ *   - The name "xh_hcmp" stands for "XHttp
  *     Header CoMPare"
  */
 _Bool xh_hcmp(const char *a, const char *b)
@@ -386,8 +386,8 @@ static void accept_connection(context_t *ctx)
 	conn->request.type = XH_REQ;
 
 	struct epoll_event buffer;
-	buffer.events = EPOLLET  | EPOLLIN 
-	              | EPOLLPRI | EPOLLOUT 
+	buffer.events = EPOLLET  | EPOLLIN
+	              | EPOLLPRI | EPOLLOUT
 	              | EPOLLRDHUP;
 	buffer.data.ptr = conn;
 	if(epoll_ctl(ctx->epfd, EPOLL_CTL_ADD, cfd, &buffer))
@@ -407,19 +407,19 @@ static void close_connection(context_t *ctx, conn_t *conn)
 {
 	(void) close(conn->fd);
 
-	if(conn->in.data != NULL) 
+	if(conn->in.data != NULL)
 	{
 		free(conn->in.data);
 		conn->in.data = NULL;
 	}
-	
+
 	if(conn->out.data != NULL)
-	{ 
+	{
 		free(conn->out.data);
 		conn->out.data = NULL;
 	}
 
-	if(conn->request.public.headers != NULL) 
+	if(conn->request.public.headers != NULL)
 		free(conn->request.public.headers);
 
 	conn->fd = -1;
@@ -470,10 +470,10 @@ static void skip_until(char *str, uint32_t len, uint32_t *i, char c)
 		*i += 1;
 }
 
-struct parse_err_t { 
-	_Bool   internal; 
-	char        *msg; 
-	unsigned int len; 
+struct parse_err_t {
+	_Bool   internal;
+	char        *msg;
+	unsigned int len;
 };
 
 static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
@@ -611,7 +611,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 			}
 
 			assert(str[i] == '\r');
-			
+
 			i += 1; // Skip the \r.
 
 			if(i == len)
@@ -631,7 +631,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 			int new_capacity = capacity == 0 ? 8 : capacity * 2;
 
 			void *temp = realloc(headers, new_capacity * sizeof(xh_header));
-		
+
 			if(temp == NULL)
 			{
 				if(headers != NULL) free(headers);
@@ -642,10 +642,10 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 			headers = temp;
 		}
 
-		headers[headerc++] = (xh_header) { 
-			.name      = str + hname_offset, 
+		headers[headerc++] = (xh_header) {
+			.name      = str + hname_offset,
 			.name_len  =       hname_length,
-			.value     = str + hvalue_offset, 
+			.value     = str + hvalue_offset,
 			.value_len =       hvalue_length,
 		};
 
@@ -731,8 +731,8 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 				req->version_minor = 0;
 				break;
 			}
-			
-			bad_version = 1;	
+
+			bad_version = 1;
 			break;
 
 			case sizeof("HTTP/M")-1:
@@ -857,7 +857,7 @@ static void append(conn_t *conn, const char *str, int len)
 	if(conn->out.size - conn->out.used < (uint32_t) len)
 	{
 		uint32_t new_size = 2 * conn->out.size;
-		
+
 		if(new_size < conn->out.used + (uint32_t) len)
 			new_size = conn->out.used + len;
 
@@ -946,8 +946,8 @@ static void respond(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, 
 	if(head_only)
 	{
 		conn->request.public.method_id = XH_GET;
-		conn->request.public.method = "HEAD";
-		conn->request.public.method_len = sizeof("HEAD")-1;
+		conn->request.public.method = "GET";
+		conn->request.public.method_len = sizeof("GET")-1;
 	}
 
 	xh_response2 res;
@@ -1068,7 +1068,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 			if(b->size - b->used < 128)
 			{
 				uint32_t new_size = (b->size == 0) ? 512 : (2 * b->size);
-			
+
 				void *temp = realloc(b->data, new_size);
 
 				if(temp == NULL)
@@ -1080,7 +1080,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 
 				// TODO: Change the pointers in conn->request
 				//       if the head was already parsed.
-				
+
 				b->data = temp;
 				b->size = new_size;
 			}
@@ -1093,11 +1093,11 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 			{
 				if(n == 0)
 				{
-					// Peer disconnected. 
+					// Peer disconnected.
 					close_connection(ctx, conn);
 					return;
 				}
-				
+
 				if(errno == EAGAIN || errno == EWOULDBLOCK)
 					break; // Done downloading.
 
@@ -1132,7 +1132,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 				if(i == UINT32_MAX)
 					// No \r\n\r\n found. The head of the request wasn't fully received yet.
 					return;
-					
+
 				// i is relative to start.
 				i += start;
 			}
@@ -1149,7 +1149,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 				if(len == UINT32_MAX)
 				{
 					static const char msg[] = "Couldn't determine the content length";
-					(void) snprintf(buffer, sizeof(buffer), 
+					(void) snprintf(buffer, sizeof(buffer),
 						"HTTP/1.1 400 Bad Request\r\n"
 						"Content-Type: text/plain;charset=utf-8\r\n"
 						"Content-Length: %ld\r\n"
@@ -1158,7 +1158,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 				}
 				else if(err.internal)
 				{
-					(void) snprintf(buffer, sizeof(buffer), 
+					(void) snprintf(buffer, sizeof(buffer),
 						"HTTP/1.1 500 Internal Server Error\r\n"
 						"Content-Type: text/plain;charset=utf-8\r\n"
 						"Content-Length: %d\r\n"
@@ -1168,7 +1168,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 				else
 				{
 					// 400 Bad Request.
-					(void) snprintf(buffer, sizeof(buffer), 
+					(void) snprintf(buffer, sizeof(buffer),
 						"HTTP/1.1 400 Bad Request\r\n"
 						"Content-Type: text/plain;charset=utf-8\r\n"
 						"Content-Length: %d\r\n"
@@ -1180,7 +1180,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 				//       to hold the response then the response will
 				//       be sent truncated. But that's not a problem
 				//       since we'll close the connection after this
-				//       response either way. 
+				//       response either way.
 
 				append(conn, buffer, -1);
 				conn->close_when_uploaded = 1;
@@ -1195,6 +1195,9 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 		if(conn->head_received && conn->body_offset + conn->body_length <= conn->in.used)
 		{
 			// The rest of the body arrived.
+
+			conn->request.public.body = conn->in.data + conn->body_offset;
+			conn->request.public.body_len = conn->body_length;
 
 			respond(ctx, conn, callback);
 
@@ -1219,8 +1222,8 @@ void xh_quit(xh_handle handle)
 	ctx->exiting = 1;
 }
 
-static const char *init(context_t *context, unsigned short port, 
-				  		unsigned int maxconns, _Bool reuse, 
+static const char *init(context_t *context, unsigned short port,
+				  		unsigned int maxconns, _Bool reuse,
 				  		int backlog)
 {
 	{
@@ -1232,7 +1235,7 @@ static const char *init(context_t *context, unsigned short port,
 		if(reuse)
 		{
 			int v = 1;
-			if(setsockopt(context->fd, SOL_SOCKET, 
+			if(setsockopt(context->fd, SOL_SOCKET,
 						  SO_REUSEADDR, &v, sizeof(v)))
 			{
 				(void) close(context->fd);
@@ -1241,9 +1244,9 @@ static const char *init(context_t *context, unsigned short port,
 		}
 
 		struct sockaddr_in temp;
-		
+
 		memset(&temp, 0, sizeof(temp));
-		
+
 		temp.sin_family      = AF_INET;
 		temp.sin_port        = htons(port);
 		temp.sin_addr.s_addr = INADDR_ANY;
@@ -1274,7 +1277,7 @@ static const char *init(context_t *context, unsigned short port,
 
 		temp.events = EPOLLIN;
 		temp.data.ptr = NULL;
-		
+
 		if(epoll_ctl(context->epfd, EPOLL_CTL_ADD, context->fd, &temp))
 		{
 			(void) close(context->fd);
@@ -1342,7 +1345,7 @@ const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*)
 			}
 
 			conn_t *conn = events[i].data.ptr;
-			
+
 			if(events[i].events & EPOLLRDHUP)
 			{
 				// Disconnection.
@@ -1366,7 +1369,7 @@ const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*)
 				// Note that this may close the connection. If any logic
 			    // were to come after this function, it couldn't refer
 			    // to the connection structure.
-				when_data_is_ready_to_be_read(&context, conn, callback); 
+				when_data_is_ready_to_be_read(&context, conn, callback);
 			}
 
 			if(old_connum == context.connum)
@@ -1375,7 +1378,7 @@ const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*)
 				// upload the data in the output buffer.
 
 				if(!upload(conn))
-				
+
 					close_connection(&context, conn);
 
 				else
