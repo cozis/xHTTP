@@ -13,6 +13,11 @@
 #include <sys/socket.h>
 #include "xhttp.h"
 
+/* +-----------------+
+ * | OVERVIEW |
+ * | 
+ */
+
 typedef enum { XH_REQ, XH_RES } struct_type_t;
 
 typedef struct {
