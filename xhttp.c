@@ -13,9 +13,8 @@
 #include <sys/socket.h>
 #include "xhttp.h"
 
-/* +-----------------+
- * | OVERVIEW |
- * | 
+/* OVERVIEW
+ * 
  */
 
 typedef enum { XH_REQ, XH_RES } struct_type_t;
@@ -593,7 +592,7 @@ static void xh_response_deinit(xh_response2 *res)
 		free(res->headers);
 }
 
-static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callback)(xh_request*, xh_response*))
+static _Bool respond(conn_t *conn, void (*callback)(xh_request*, xh_response*))
 {
 	_Bool keep_alive;
 	{
@@ -676,21 +675,8 @@ static _Bool respond(conn_t *conn, conn_t **freelist, int *connum, void (*callba
 
 	conn->served += 1;
 
-	if(!upload(conn))
-	{
-		close_connection(conn, freelist, connum);
-		return 0;
-	}
-
 	if(!keep_alive)
-	{
-		if(conn->out.used == 0)
-			close_connection(conn, freelist, connum);
-		else 
-			conn->close_when_uploaded = 1;
-		return 0;
-	}
-
+		conn->close_when_uploaded = 1;
 	return 1;
 }
 
@@ -865,20 +851,7 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 				//       response either way. 
 
 				append(conn, buffer, -1);
-
 				conn->close_when_uploaded = 1;
-
-				if(!upload(conn))
-				{
-					// The socket wasn't found blocking
-					// so the upload started, but then
-					// it failed.
-					close_connection(conn, freelist, connum);
-					return;
-				}
-
-				if(conn->out.used == 0)
-					close_connection(conn, freelist, connum);
 				return;
 			}
 
@@ -891,7 +864,7 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 			// The rest of the body didn't arrive yet.
 			return;
 
-		if(!respond(conn, freelist, connum, callback))
+		if(!respond(conn, callback))
 			return;
 
 		// Remove the request from the input buffer by
@@ -1029,20 +1002,7 @@ void xhttp(void (*callback)(xh_request*, xh_response*), unsigned short port, uns
 				continue;
 			}
 
-			if(events[i].events & EPOLLOUT)
-			{
-				if(!upload(conn))
-				{
-					close_connection(conn, &freelist, &connum);
-					continue;
-				}
-
-				if(conn->out.used == 0 && conn->close_when_uploaded)
-				{
-					close_connection(conn, &freelist, &connum);
-					continue;
-				}
-			}
+			int old_connum = connum;
 
 			if((events[i].events & (EPOLLIN | EPOLLPRI)) && conn->close_when_uploaded == 0)
 			{
@@ -1050,6 +1010,20 @@ void xhttp(void (*callback)(xh_request*, xh_response*), unsigned short port, uns
 			    // were to come after this function, it couldn't refer
 			    // to the connection structure.
 				when_data_is_ready_to_be_read(conn, &freelist, &connum, callback); 
+			}
+
+			if(old_connum == connum)
+			{
+				// The connection wasn't closed. Try to
+				// upload the data in the output buffer.
+
+				if(!upload(conn))
+				
+					close_connection(conn, &freelist, &connum);
+
+				else
+					if(conn->out.used == 0 && conn->close_when_uploaded)
+						close_connection(conn, &freelist, &connum);
 			}
 		}
 	}

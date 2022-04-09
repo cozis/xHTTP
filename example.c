@@ -10,8 +10,7 @@ static void callback(xh_request *req, xh_response *res)
 	(void) req;
 	res->status_code = 200;
 	res->status_text = "OK";
-	xh_hadd(res, "Content-Type", "text/plain;charset=utf-8");
-	xh_hadd(res, "Content-Language", "en-US");
+	xh_hadd(res, "Content-Type", "text/plain");
 	res->body = "Hello, world!";
 	res->body_len = sizeof("Hello, world!")-1;
 }
