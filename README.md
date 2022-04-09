@@ -1,4 +1,4 @@
-# xserver
+# xHTTP
 This is the implementation of an embeddable HTTP server implemented in C.
 
-I'm sperimenting with 
+This is still in the early sperimentation phase.
