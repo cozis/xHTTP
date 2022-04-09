@@ -54,6 +54,300 @@ struct conn_t {
     xh_request2  request;
 };
 
+typedef struct {
+	_Bool exiting;
+	int fd, epfd, maxconns, connum;
+	conn_t *pool, *freelist;
+} context_t;
+
+
+/* Symbol: find_header
+ *
+ *   Finds the header from a header array.
+ *
+ * Arguments:
+ *
+ *   - headers: The header array.
+ *
+ *   - count: The length of the header array.
+ *            It can't be negative.
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ * Returns: 
+ *   The index in the array of the matched header, or
+ *   -1 is no header was found.
+ */
+static int find_header(xh_header *headers, int count, const char *name)
+{
+	for(int i = 0; i < count; i += 1)
+		if(xh_hcmp(name, headers[i].name))
+			return i;
+	return -1;
+}
+
+/* Symbol: xh_hadd
+ *
+ *   Add or replace a header into a response object.
+ *
+ * Arguments:
+ *
+ *   - res: The response object.
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ *   - valfmt: A printf-like format string that evaluates
+ *             to the header's value.
+ *
+ * Returns: 
+ *   Nothing. The header may or may not be added 
+ *   (or replaced) to the request.
+ *
+ * Notes:
+ *
+ *   - The name "xh_hadd" stands for "XHttp 
+ *     Header ADD".
+ */
+void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
+{
+	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
+
+	assert(&res2->public == res);
+
+	if(res2->failed)
+		return;
+
+	int i = find_header(res2->headers, res2->headerc, name);
+
+	unsigned int name_len, value_len;
+
+	name_len = name == NULL ? 0 : strlen(name);
+
+	char value[512];
+	{
+		va_list args;
+		va_start(args, valfmt);
+		int n = vsnprintf(value, sizeof(value), valfmt, args);
+		va_end(args);
+
+		if(n < 0)
+		{
+			// Bad format.
+			res2->failed = 1;
+			return;
+		}
+
+		if((unsigned int) n >= sizeof(value))
+		{
+			// Static buffer is too small.
+			res2->failed = 1;
+			return;
+		}
+
+		value_len = n;
+	}
+
+	// Duplicate name and value.
+	char *name2, *value2;
+	{
+		void *mem = malloc(name_len + value_len + 2);
+
+		if(mem == NULL)
+		{
+			// ERROR!
+			res2->failed = 1;
+			return;
+		}
+
+		name2  = (char*) mem;
+		value2 = (char*) mem + name_len + 1;
+	
+		strcpy(name2, name);
+		strcpy(value2, value);
+	}
+
+	if(i < 0)
+	{
+		if(res2->headerc == res2->capacity)
+			{
+				int new_capacity = res2->capacity == 0 ? 8 : res2->capacity * 2;
+
+				void *tmp = realloc(res2->headers, new_capacity * sizeof(xh_header));
+
+				if(tmp == NULL)
+				{
+					// ERROR!
+					res2->failed = 1;
+					free(name2);
+					return;
+				}
+
+				res2->public.headers = tmp;
+				res2->headers = tmp;
+				res2->capacity = new_capacity;
+			}
+
+		res2->headers[res2->headerc] = (xh_header) { 
+			.name = name2, .value = value2, 
+			.name_len = name_len, .value_len = value_len };
+
+		res2->headerc += 1;
+		res2->public.headerc = res2->headerc;
+	}
+	else
+	{
+		free(res2->headers[i].name);
+		res2->headers[i] = (xh_header) { 
+			.name = name2, .value = value2, 
+			.name_len = name_len, .value_len = value_len };
+	}
+}
+
+/* Symbol: xh_hrem
+ *
+ *   Remove a header from a response object.
+ *
+ * Arguments:
+ *
+ *   - res: The response object that contains the
+ *          header to be removed.
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ * Returns: 
+ *   Nothing.
+ *
+ * Notes:
+ *
+ *   - The name "xh_hrem" stands for "XHttp 
+ *     Header REMove".
+ */
+void xh_hrem(xh_response *res, const char *name)
+{
+	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
+
+	assert(&res2->public == res);
+
+	if(res2->failed)
+		return;
+
+	int i = find_header(res2->headers, res2->headerc, name);
+
+	if(i < 0)
+		return;
+
+	free(res2->headers[i].name);
+
+	assert(i >= 0);
+
+	for(; (unsigned int) i < res2->headerc-1; i += 1)
+		res2->headers[i] = res2->headers[i+1];
+
+	res2->headerc -= 1;
+	res2->public.headerc -= 1;
+}
+
+/* Symbol: xh_hget
+ *
+ *   Find the contents of a header given it's
+ *   name from a response or request object.
+ *
+ * Arguments:
+ *
+ *   - req_or_res: The request or response object
+ *                 that contains the header. This
+ *                 argument must originally be of
+ *                 type [xh_request*] or [xh_response*].
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ * Returns: 
+ *   A zero-terminated string containing the value of
+ *   the header or NULL if the header isn't contained
+ *   in the request/response.
+ *
+ * Notes:
+ *
+ *   - The name "xh_hget" stands for "XHttp 
+ *     Header GET".
+ *
+ *   - The returned value is invalidated if
+ *     the header is removed using [xh_hrem].
+ */
+const char *xh_hget(void *req_or_res, const char *name)
+{
+	xh_header   *headers;
+	unsigned int headerc;
+
+	{
+		_Static_assert(offsetof(xh_response2, public) == offsetof(xh_request2, public));
+
+		struct_type_t type = ((xh_request2*) ((char*) req_or_res - offsetof(xh_request2, public)))->type;
+
+		if(type == XH_REQ)
+		{
+			headers = ((xh_request*) req_or_res)->headers;
+			headerc = ((xh_request*) req_or_res)->headerc;
+		}
+		else
+		{
+			assert(type == XH_RES);
+			headers = ((xh_response*) req_or_res)->headers;
+			headerc = ((xh_response*) req_or_res)->headerc;
+		}
+	}
+
+	int i = find_header(headers, headerc, name);
+
+	if(i < 0)
+		return NULL;
+
+	return headers[i].value;
+}
+
+/* Symbol: xh_hcmp
+ *
+ *   This function compares header names.
+ *   The comparison isn't case-sensitive.
+ *
+ * Arguments:
+ *
+ *   - a: Zero-terminated string that contains
+ *        the first header's name.
+ *
+ *   - b: Zero-terminated string that contains
+ *        the second header's name.
+ *
+ * Returns: 
+ *   1 if the header names match, 0 otherwise.
+ *
+ * Notes:
+ *   - The name "xh_hcmp" stands for "XHttp 
+ *     Header CoMPare"
+ */
+_Bool xh_hcmp(const char *a, const char *b)
+{
+	if(a == NULL || b == NULL)
+		return a == b;
+
+	while(*a != '\0' && *b != '\0' && tolower(*a) == tolower(*b))
+		a += 1, b += 1;
+
+	return tolower(*a) == tolower(*b);
+}
+
 static _Bool set_non_blocking(int fd)
 {
 	int flags = fcntl(fd, F_GETFL);
@@ -64,12 +358,9 @@ static _Bool set_non_blocking(int fd)
 	return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
-/* Accepts a connection from [fd], creates a connection
- * struct for it and registers it with the epoll.
- */
-static void accept_connection(int fd, int epfd, conn_t **freelist, int *connum)
+static void accept_connection(context_t *ctx)
 {
-	int cfd = accept(fd, NULL, NULL);
+	int cfd = accept(ctx->fd, NULL, NULL);
 
 	if(cfd < 0)
 		return; // Failed to accept.
@@ -80,53 +371,73 @@ static void accept_connection(int fd, int epfd, conn_t **freelist, int *connum)
 		return;
 	}
 
-	if(*freelist == NULL)
+	if(ctx->freelist == NULL)
 	{
 		// Connection limit reached.
 		(void) close(cfd);
 		return;
 	}
 
-	conn_t *conn = *freelist;
-	*freelist = conn->next;
+	conn_t *conn = ctx->freelist;
+	ctx->freelist = conn->next;
 
 	memset(conn, 0, sizeof(conn_t));
 	conn->fd = cfd;
 	conn->request.type = XH_REQ;
 
 	struct epoll_event buffer;
-	buffer.events = EPOLLET | EPOLLIN | EPOLLPRI | EPOLLOUT | EPOLLRDHUP;
+	buffer.events = EPOLLET  | EPOLLIN 
+	              | EPOLLPRI | EPOLLOUT 
+	              | EPOLLRDHUP;
 	buffer.data.ptr = conn;
-	if(epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &buffer))
+	if(epoll_ctl(ctx->epfd, EPOLL_CTL_ADD, cfd, &buffer))
 	{
 		(void) close(cfd);
 
-		conn->next = *freelist;
-		*freelist = conn;
+		conn->fd = -1;
+		conn->next = ctx->freelist;
+		ctx->freelist = conn;
 		return;
 	}
 
-	*connum += 1;
+	ctx->connum += 1;
 }
 
-static void close_connection(conn_t *conn, conn_t **freelist, int *connum)
+static void close_connection(context_t *ctx, conn_t *conn)
 {
 	(void) close(conn->fd);
 
-	if(conn-> in.data != NULL) 
-		free(conn-> in.data);
+	if(conn->in.data != NULL) 
+	{
+		free(conn->in.data);
+		conn->in.data = NULL;
+	}
 	
-	if(conn->out.data != NULL) 
+	if(conn->out.data != NULL)
+	{ 
 		free(conn->out.data);
+		conn->out.data = NULL;
+	}
 
 	if(conn->request.public.headers != NULL) 
 		free(conn->request.public.headers);
 
-	conn->next = *freelist;
-	*freelist = conn;
+	conn->fd = -1;
 
-	*connum -= 1;
+	conn->next = ctx->freelist;
+	ctx->freelist = conn;
+
+	ctx->connum -= 1;
 }
+
+#if DEBUG
+static void close_connection_(context_t *ctx, conn_t *conn, const char *file, int line)
+{
+	fprintf(stderr, "Closing connection at %s:%d.\n", file, line);
+	close_connection(ctx, conn);
+}
+#define close_connection(ctx, conn) close_connection_(ctx, conn, __FILE__, __LINE__)
+#endif
 
 static _Bool is_uppercase_alpha(char c)
 {
@@ -592,7 +903,7 @@ static void xh_response_deinit(xh_response2 *res)
 		free(res->headers);
 }
 
-static _Bool respond(conn_t *conn, void (*callback)(xh_request*, xh_response*))
+static void respond(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, xh_response*))
 {
 	_Bool keep_alive;
 	{
@@ -610,6 +921,23 @@ static _Bool respond(conn_t *conn, void (*callback)(xh_request*, xh_response*))
 				keep_alive = 0;
 			else
 				keep_alive = 0;
+		}
+	}
+
+	if(keep_alive)
+	{
+		printf("Served %d.\n", conn->served);
+
+		if(conn->served >= 20)
+		{
+			printf("Closing because %d pages were served.\n", conn->served);
+			keep_alive = 0;
+		}
+
+		if(ctx->connum > 0.6 * ctx->maxconns)
+		{
+			printf("Closing because there are %d connections out of %d.\n", ctx->connum, ctx->maxconns);
+			keep_alive = 0;
 		}
 	}
 
@@ -677,7 +1005,6 @@ static _Bool respond(conn_t *conn, void (*callback)(xh_request*, xh_response*))
 
 	if(!keep_alive)
 		conn->close_when_uploaded = 1;
-	return 1;
 }
 
 static uint32_t determine_content_length(xh_request *req)
@@ -729,7 +1056,7 @@ static uint32_t determine_content_length(xh_request *req)
 	return result;
 }
 
-static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *connum, void (*callback)(xh_request*, xh_response*))
+static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, xh_response*))
 {
 	// Download the data in the input buffer.
 	uint32_t downloaded;
@@ -747,7 +1074,7 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 				if(temp == NULL)
 				{
 					// ERROR!
-					close_connection(conn, freelist, connum);
+					close_connection(ctx, conn);
 					return;
 				}
 
@@ -758,6 +1085,8 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 				b->size = new_size;
 			}
 
+			assert(b->size > b->used);
+
 			int n = recv(conn->fd, b->data + b->used, b->size - b->used, 0);
 
 			if(n <= 0)
@@ -765,15 +1094,18 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 				if(n == 0)
 				{
 					// Peer disconnected. 
-					close_connection(conn, freelist, connum);
+					close_connection(ctx, conn);
 					return;
 				}
-		
+				
 				if(errno == EAGAIN || errno == EWOULDBLOCK)
 					break; // Done downloading.
 
 				// ERROR!
-				close_connection(conn, freelist, connum);
+#if DEBUG
+				perror("recv");
+#endif
+				close_connection(ctx, conn);
 				return;
 			}
 
@@ -860,458 +1192,205 @@ static void when_data_is_ready_to_be_read(conn_t *conn, conn_t **freelist, int *
 			conn->body_length = len;
 		}
 
-		if(!conn->head_received || conn->body_offset + conn->body_length > conn->in.used)
-			// The rest of the body didn't arrive yet.
-			return;
+		if(conn->head_received && conn->body_offset + conn->body_length <= conn->in.used)
+		{
+			// The rest of the body arrived.
 
-		if(!respond(conn, callback))
-			return;
+			respond(ctx, conn, callback);
 
-		// Remove the request from the input buffer by
-		// copying back its remaining contents.
-		uint32_t consumed = conn->body_offset + conn->body_length;
-		memmove(conn->in.data, conn->in.data + consumed, conn->in.used - consumed);
-		conn->in.used -= consumed;
-		conn->head_received = 0;
+			// Remove the request from the input buffer by
+			// copying back its remaining contents.
+			uint32_t consumed = conn->body_offset + conn->body_length;
+			memmove(conn->in.data, conn->in.data + consumed, conn->in.used - consumed);
+			conn->in.used -= consumed;
+			conn->head_received = 0;
 
-		served += 1;
+			served += 1;
+
+			if(conn->close_when_uploaded)
+				break;
+		}
 	}
 }
 
-void xhttp(void (*callback)(xh_request*, xh_response*), unsigned short port, unsigned int maxconns, _Bool reuse)
+void xh_quit(xh_handle handle)
 {
-	int fd;
-	{
-		fd = socket(AF_INET, SOCK_STREAM, 0);
+	context_t *ctx = handle;
+	ctx->exiting = 1;
+}
 
-		if(fd < 0)
-		{
-			// ERROR!
-			fprintf(stderr, "Failed to create socket\n");
-			return;
-		}
+static const char *init(context_t *context, unsigned short port, 
+				  		unsigned int maxconns, _Bool reuse, 
+				  		int backlog)
+{
+	{
+		context->fd = socket(AF_INET, SOCK_STREAM, 0);
+
+		if(context->fd < 0)
+			return "Failed to create socket";
 
 		if(reuse)
 		{
 			int v = 1;
-			if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(v)))
+			if(setsockopt(context->fd, SOL_SOCKET, 
+						  SO_REUSEADDR, &v, sizeof(v)))
 			{
-				// ERROR: Failed to set socket option.
-				fprintf(stderr, "Failed to set socket option\n");
-				(void) close(fd);
-				return;
+				(void) close(context->fd);
+				return "Failed to set socket option";
 			}
 		}
 
 		struct sockaddr_in temp;
+		
 		memset(&temp, 0, sizeof(temp));
-		temp.sin_family = AF_INET;
-		temp.sin_port = htons(port);
+		
+		temp.sin_family      = AF_INET;
+		temp.sin_port        = htons(port);
 		temp.sin_addr.s_addr = INADDR_ANY;
-		if(bind(fd, (struct sockaddr*) &temp, sizeof(temp)))
+
+		if(bind(context->fd, (struct sockaddr*) &temp, sizeof(temp)))
 		{
-			// ERROR!
-			fprintf(stderr, "Failed to bind to address\n");
-			(void) close(fd);
-			return;
+			(void) close(context->fd);
+			return "Failed to bind to address";
 		}
 
-		if(listen(fd, 32))
+		if(listen(context->fd, backlog))
 		{
-			// ERROR!
-			fprintf(stderr, "Failed to listen for connections\n");
-			(void) close(fd);
-			return;
+			(void) close(context->fd);
+			return "Failed to listen for connections";
 		}
 	}
 
-	int epfd;
 	{
-		epfd = epoll_create1(0);
+		context->epfd = epoll_create1(0);
 
-		if(epfd < 0)
+		if(context->epfd < 0)
 		{
-			// ERROR!
-			fprintf(stderr, "Failed to create epoll\n");
-			(void) close(fd);
-			return;
+			(void) close(context->fd);
+			return "Failed to create epoll";
 		}
 
 		struct epoll_event temp;
+
 		temp.events = EPOLLIN;
 		temp.data.ptr = NULL;
-		if(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &temp))
+		
+		if(epoll_ctl(context->epfd, EPOLL_CTL_ADD, context->fd, &temp))
 		{
-			// ERROR!
-			fprintf(stderr, "Failed to add listener to epoll\n");
-			(void) close(fd);
-			(void) close(epfd);
-			return;
+			(void) close(context->fd);
+			(void) close(context->epfd);
+			return "Failed to add listener to epoll";
 		}
 	}
 
-	conn_t *pool, *freelist;
 	{
-		pool = malloc(maxconns * sizeof(conn_t));
+		context->pool = malloc(maxconns * sizeof(conn_t));
 
-		if(pool == NULL)
+		if(context->pool == NULL)
 		{
-			fprintf(stderr, "Failed to allocate connection pool\n");
-			(void) close(fd);
-			(void) close(epfd);
-			return;
+			(void) close(context->fd);
+			(void) close(context->epfd);
+			return "Failed to allocate connection pool";
 		}
 
-		pool[0].prev = NULL;
+		context->pool[0].prev = NULL;
 
 		for(unsigned int i = 0; i < maxconns; i += 1)
 		{
-			pool[i].next = pool + i + 1;
-			pool[i].prev = NULL;
+			context->pool[i].fd = -1;
+			context->pool[i].next = context->pool + i + 1;
+			context->pool[i].prev = NULL;
 		}
 
-		pool[maxconns-1].next = NULL;
+		context->pool[maxconns-1].next = NULL;
 
-		freelist = pool;
+		context->freelist = context->pool;
 	}
 
-	int connum = 0;
+	context->connum = 0;
+	context->maxconns = maxconns;
+	context->exiting = 0;
+	return NULL;
+}
+
+const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*), unsigned short port, unsigned int maxconns, _Bool reuse)
+{
+	context_t context;
+
+	int backlog = 32;
+	const char *error = init(&context, port, maxconns, reuse, backlog);
+
+	if(error != NULL)
+		return error;
+
+	if(handle)
+		*handle = &context;
 
 	struct epoll_event events[64];
 
-	while(1)
+	while(!context.exiting)
 	{
-		int num = epoll_wait(epfd, events, sizeof(events)/sizeof(events[0]), 5000);
+		int num = epoll_wait(context.epfd, events, sizeof(events)/sizeof(events[0]), 5000);
 
 		for(int i = 0; i < num; i += 1)
 		{
 			if(events[i].data.ptr == NULL)
 			{
 				// New connection.
-				assert(events[i].events == EPOLLIN);
-				accept_connection(fd, epfd, &freelist, &connum);
+				accept_connection(&context);
 				continue;
 			}
 
 			conn_t *conn = events[i].data.ptr;
-
-			if(events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
+			
+			if(events[i].events & EPOLLRDHUP)
 			{
-				// Error or disconnection.
-				close_connection(conn, &freelist, &connum);
+				// Disconnection.
+				close_connection(&context, conn);
 				continue;
 			}
 
-			int old_connum = connum;
+			if(events[i].events & (EPOLLERR | EPOLLHUP))
+			{
+				// Connection closed or an error occurred.
+				// We continue as nothing happened so that
+				// the error is reported on the [recv] or
+				// [send] call site.
+				events[i].events = EPOLLIN | EPOLLOUT;
+			}
+
+			int old_connum = context.connum;
 
 			if((events[i].events & (EPOLLIN | EPOLLPRI)) && conn->close_when_uploaded == 0)
 			{
 				// Note that this may close the connection. If any logic
 			    // were to come after this function, it couldn't refer
 			    // to the connection structure.
-				when_data_is_ready_to_be_read(conn, &freelist, &connum, callback); 
+				when_data_is_ready_to_be_read(&context, conn, callback); 
 			}
 
-			if(old_connum == connum)
+			if(old_connum == context.connum)
 			{
 				// The connection wasn't closed. Try to
 				// upload the data in the output buffer.
 
 				if(!upload(conn))
 				
-					close_connection(conn, &freelist, &connum);
+					close_connection(&context, conn);
 
 				else
 					if(conn->out.used == 0 && conn->close_when_uploaded)
-						close_connection(conn, &freelist, &connum);
+						close_connection(&context, conn);
 			}
 		}
 	}
-}
 
-/* Symbol: find_header
- *
- *   Finds the header from a header array.
- *
- * Arguments:
- *
- *   - headers: The header array.
- *
- *   - count: The length of the header array.
- *            It can't be negative.
- *
- *   - name: Zero-terminated string that contains
- *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
- *           so it's not case-sensitive.
- *
- * Returns: 
- *   The index in the array of the matched header, or
- *   -1 is no header was found.
- */
-static int find_header(xh_header *headers, int count, const char *name)
-{
-	for(int i = 0; i < count; i += 1)
-		if(xh_hcmp(name, headers[i].name))
-			return i;
-	return -1;
-}
+	for(unsigned int i = 0; i < maxconns; i += 1)
+		if(context.pool[i].fd != -1)
+			close_connection(&context, context.pool + i);
 
-/* Symbol: xh_hadd
- *
- *   Add or replace a header into a response object.
- *
- * Arguments:
- *
- *   - res: The response object.
- *
- *   - name: Zero-terminated string that contains
- *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
- *           so it's not case-sensitive.
- *
- *   - valfmt: A printf-like format string that evaluates
- *             to the header's value.
- *
- * Returns: 
- *   Nothing. The header may or may not be added 
- *   (or replaced) to the request.
- *
- * Notes:
- *
- *   - The name "xh_hadd" stands for "XHttp 
- *     Header ADD".
- */
-void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
-{
-	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
-
-	assert(&res2->public == res);
-
-	if(res2->failed)
-		return;
-
-	int i = find_header(res2->headers, res2->headerc, name);
-
-	unsigned int name_len, value_len;
-
-	name_len = name == NULL ? 0 : strlen(name);
-
-	char value[512];
-	{
-		va_list args;
-		va_start(args, valfmt);
-		int n = vsnprintf(value, sizeof(value), valfmt, args);
-		va_end(args);
-
-		if(n < 0)
-		{
-			// Bad format.
-			res2->failed = 1;
-			return;
-		}
-
-		if((unsigned int) n >= sizeof(value))
-		{
-			// Static buffer is too small.
-			res2->failed = 1;
-			return;
-		}
-
-		value_len = n;
-	}
-
-	// Duplicate name and value.
-	char *name2, *value2;
-	{
-		void *mem = malloc(name_len + value_len + 2);
-
-		if(mem == NULL)
-		{
-			// ERROR!
-			res2->failed = 1;
-			return;
-		}
-
-		name2  = (char*) mem;
-		value2 = (char*) mem + name_len + 1;
-	
-		strcpy(name2, name);
-		strcpy(value2, value);
-	}
-
-	if(i < 0)
-	{
-		if(res2->headerc == res2->capacity)
-			{
-				int new_capacity = res2->capacity == 0 ? 8 : res2->capacity * 2;
-
-				void *tmp = realloc(res2->headers, new_capacity * sizeof(xh_header));
-
-				if(tmp == NULL)
-				{
-					// ERROR!
-					res2->failed = 1;
-					free(name2);
-					return;
-				}
-
-				res2->public.headers = tmp;
-				res2->headers = tmp;
-				res2->capacity = new_capacity;
-			}
-
-		res2->headers[res2->headerc] = (xh_header) { 
-			.name = name2, .value = value2, 
-			.name_len = name_len, .value_len = value_len };
-
-		res2->headerc += 1;
-		res2->public.headerc = res2->headerc;
-	}
-	else
-	{
-		free(res2->headers[i].name);
-		res2->headers[i] = (xh_header) { 
-			.name = name2, .value = value2, 
-			.name_len = name_len, .value_len = value_len };
-	}
-}
-
-/* Symbol: xh_hrem
- *
- *   Remove a header from a response object.
- *
- * Arguments:
- *
- *   - res: The response object that contains the
- *          header to be removed.
- *
- *   - name: Zero-terminated string that contains
- *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
- *           so it's not case-sensitive.
- *
- * Returns: 
- *   Nothing.
- *
- * Notes:
- *
- *   - The name "xh_hrem" stands for "XHttp 
- *     Header REMove".
- */
-void xh_hrem(xh_response *res, const char *name)
-{
-	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
-
-	assert(&res2->public == res);
-
-	if(res2->failed)
-		return;
-
-	int i = find_header(res2->headers, res2->headerc, name);
-
-	if(i < 0)
-		return;
-
-	free(res2->headers[i].name);
-
-	assert(i >= 0);
-
-	for(; (unsigned int) i < res2->headerc-1; i += 1)
-		res2->headers[i] = res2->headers[i+1];
-
-	res2->headerc -= 1;
-	res2->public.headerc -= 1;
-}
-
-/* Symbol: xh_hget
- *
- *   Find the contents of a header given it's
- *   name from a response or request object.
- *
- * Arguments:
- *
- *   - req_or_res: The request or response object
- *                 that contains the header. This
- *                 argument must originally be of
- *                 type [xh_request*] or [xh_response*].
- *
- *   - name: Zero-terminated string that contains
- *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
- *           so it's not case-sensitive.
- *
- * Returns: 
- *   A zero-terminated string containing the value of
- *   the header or NULL if the header isn't contained
- *   in the request/response.
- *
- * Notes:
- *
- *   - The name "xh_hget" stands for "XHttp 
- *     Header GET".
- *
- *   - The returned value is invalidated if
- *     the header is removed using [xh_hrem].
- */
-const char *xh_hget(void *req_or_res, const char *name)
-{
-	xh_header   *headers;
-	unsigned int headerc;
-
-	{
-		_Static_assert(offsetof(xh_response2, public) == offsetof(xh_request2, public));
-
-		struct_type_t type = ((xh_request2*) ((char*) req_or_res - offsetof(xh_request2, public)))->type;
-
-		if(type == XH_REQ)
-		{
-			headers = ((xh_request*) req_or_res)->headers;
-			headerc = ((xh_request*) req_or_res)->headerc;
-		}
-		else
-		{
-			assert(type == XH_RES);
-			headers = ((xh_response*) req_or_res)->headers;
-			headerc = ((xh_response*) req_or_res)->headerc;
-		}
-	}
-
-	int i = find_header(headers, headerc, name);
-
-	if(i < 0)
-		return NULL;
-
-	return headers[i].value;
-}
-
-/* Symbol: xh_hcmp
- *
- *   This function compares header names.
- *   The comparison isn't case-sensitive.
- *
- * Arguments:
- *
- *   - a: Zero-terminated string that contains
- *        the first header's name.
- *
- *   - b: Zero-terminated string that contains
- *        the second header's name.
- *
- * Returns: 
- *   1 if the header names match, 0 otherwise.
- *
- * Notes:
- *   - The name "xh_hcmp" stands for "XHttp 
- *     Header CoMPare"
- */
-_Bool xh_hcmp(const char *a, const char *b)
-{
-	if(a == NULL || b == NULL)
-		return a == b;
-
-	while(*a != '\0' && *b != '\0' && tolower(*a) == tolower(*b))
-		a += 1, b += 1;
-
-	return tolower(*a) == tolower(*b);
+	free(context.pool);
+	(void) close(context.fd);
+	(void) close(context.epfd);
+	return NULL;
 }

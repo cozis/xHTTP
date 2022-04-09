@@ -1,6 +1,8 @@
 #ifndef XHTTP_H
 #define XHTTP_H
 
+typedef void *xh_handle;
+
 typedef enum {
 	XH_GET     = 1 << 0, 
 	XH_HEAD    = 1 << 1,
@@ -50,10 +52,11 @@ typedef struct {
 	_Bool close;
 } xh_response;
 
-void 		xhttp(void (*callback)(xh_request*, xh_response*), unsigned short port, unsigned int maxconns, _Bool reuse);
-void        xh_hadd(xh_response *res, const char *name, const char *valfmt, ...);
-void        xh_hrem(xh_response *res, const char *name);
+const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*), unsigned short port, unsigned int maxconns, _Bool reuse);
+void  xh_quit(xh_handle handle);
+void  xh_hadd(xh_response *res, const char *name, const char *valfmt, ...);
+void  xh_hrem(xh_response *res, const char *name);
 const char *xh_hget(void *req_or_res, const char *name);
-_Bool 		xh_hcmp(const char *a, const char *b);
+_Bool xh_hcmp(const char *a, const char *b);
 
 #endif // #ifndef XHTTP_H
