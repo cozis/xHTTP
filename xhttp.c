@@ -1050,6 +1050,26 @@ void xhttp(void (*callback)(xh_request*, xh_response*), unsigned short port, uns
 	}
 }
 
+/* Symbol: find_header
+ *
+ *   Finds the header from a header array.
+ *
+ * Arguments:
+ *
+ *   - headers: The header array.
+ *
+ *   - count: The length of the header array.
+ *            It can't be negative.
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ * Returns: 
+ *   The index in the array of the matched header, or
+ *   -1 is no header was found.
+ */
 static int find_header(xh_header *headers, int count, const char *name)
 {
 	for(int i = 0; i < count; i += 1)
@@ -1058,6 +1078,31 @@ static int find_header(xh_header *headers, int count, const char *name)
 	return -1;
 }
 
+/* Symbol: xh_hadd
+ *
+ *   Add or replace a header into a response object.
+ *
+ * Arguments:
+ *
+ *   - res: The response object.
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ *   - valfmt: A printf-like format string that evaluates
+ *             to the header's value.
+ *
+ * Returns: 
+ *   Nothing. The header may or may not be added 
+ *   (or replaced) to the request.
+ *
+ * Notes:
+ *
+ *   - The name "xh_hadd" stands for "XHttp 
+ *     Header ADD".
+ */
 void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
 {
 	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
@@ -1153,6 +1198,28 @@ void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
 	}
 }
 
+/* Symbol: xh_hrem
+ *
+ *   Remove a header from a response object.
+ *
+ * Arguments:
+ *
+ *   - res: The response object that contains the
+ *          header to be removed.
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ * Returns: 
+ *   Nothing.
+ *
+ * Notes:
+ *
+ *   - The name "xh_hrem" stands for "XHttp 
+ *     Header REMove".
+ */
 void xh_hrem(xh_response *res, const char *name)
 {
 	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
@@ -1178,6 +1245,36 @@ void xh_hrem(xh_response *res, const char *name)
 	res2->public.headerc -= 1;
 }
 
+/* Symbol: xh_hget
+ *
+ *   Find the contents of a header given it's
+ *   name from a response or request object.
+ *
+ * Arguments:
+ *
+ *   - req_or_res: The request or response object
+ *                 that contains the header. This
+ *                 argument must originally be of
+ *                 type [xh_request*] or [xh_response*].
+ *
+ *   - name: Zero-terminated string that contains
+ *           the header's name. The comparison with
+ *           each header's name is made using [xh_hcmp],
+ *           so it's not case-sensitive.
+ *
+ * Returns: 
+ *   A zero-terminated string containing the value of
+ *   the header or NULL if the header isn't contained
+ *   in the request/response.
+ *
+ * Notes:
+ *
+ *   - The name "xh_hget" stands for "XHttp 
+ *     Header GET".
+ *
+ *   - The returned value is invalidated if
+ *     the header is removed using [xh_hrem].
+ */
 const char *xh_hget(void *req_or_res, const char *name)
 {
 	xh_header   *headers;
@@ -1209,6 +1306,26 @@ const char *xh_hget(void *req_or_res, const char *name)
 	return headers[i].value;
 }
 
+/* Symbol: xh_hcmp
+ *
+ *   This function compares header names.
+ *   The comparison isn't case-sensitive.
+ *
+ * Arguments:
+ *
+ *   - a: Zero-terminated string that contains
+ *        the first header's name.
+ *
+ *   - b: Zero-terminated string that contains
+ *        the second header's name.
+ *
+ * Returns: 
+ *   1 if the header names match, 0 otherwise.
+ *
+ * Notes:
+ *   - The name "xh_hcmp" stands for "XHttp 
+ *     Header CoMPare"
+ */
 _Bool xh_hcmp(const char *a, const char *b)
 {
 	if(a == NULL || b == NULL)
