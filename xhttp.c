@@ -790,6 +790,9 @@ static _Bool upload(conn_t *conn)
 	sent = 0;
 	total = conn->out.used;
 
+	if(total == 0)
+		return 1;
+
 	while(sent < total)
 	{
 		int n = send(conn->fd, conn->out.data + sent, total - sent, 0);
@@ -926,19 +929,11 @@ static void respond(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, 
 
 	if(keep_alive)
 	{
-		printf("Served %d.\n", conn->served);
-
 		if(conn->served >= 20)
-		{
-			printf("Closing because %d pages were served.\n", conn->served);
 			keep_alive = 0;
-		}
 
 		if(ctx->connum > 0.6 * ctx->maxconns)
-		{
-			printf("Closing because there are %d connections out of %d.\n", ctx->connum, ctx->maxconns);
 			keep_alive = 0;
-		}
 	}
 
 	_Bool head_only = conn->request.public.method_id == XH_HEAD;
@@ -1320,7 +1315,7 @@ const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*)
 {
 	context_t context;
 
-	int backlog = 32;
+	int backlog = 256;
 	const char *error = init(&context, port, maxconns, reuse, backlog);
 
 	if(error != NULL)
