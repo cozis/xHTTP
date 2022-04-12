@@ -1,1 +1,0 @@
-gcc example.c xhttp.c -o example -Wall -Wextra -g -std=c11 -pedantic
