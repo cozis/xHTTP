@@ -40,8 +40,7 @@ typedef struct {
 } xh_request;
 
 typedef struct {
-	int          status_code;
-	const char  *status_text;
+	int status;
 
 	xh_header   *headers;
 	unsigned int headerc;

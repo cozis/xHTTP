@@ -60,6 +60,71 @@ typedef struct {
 	conn_t *pool, *freelist;
 } context_t;
 
+static const char *statis_code_to_status_text(int code)
+{
+	switch(code)
+	{
+		case 100: return "Continue";
+		case 101: return "Switching Protocols";
+		case 102: return "Processing";
+
+		case 200: return "OK";
+		case 201: return "Created";
+		case 202: return "Accepted";
+		case 203: return "Non-Authoritative Information";
+		case 204: return "No Content";
+		case 205: return "Reset Content";
+		case 206: return "Partial Content";
+		case 207: return "Multi-Status";
+		case 208: return "Already Reported";
+
+		case 300: return "Multiple Choices";
+		case 301: return "Moved Permanently";
+		case 302: return "Found";
+		case 303: return "See Other";
+		case 304: return "Not Modified";
+		case 305: return "Use Proxy";
+		case 306: return "Switch Proxy";
+		case 307: return "Temporary Redirect";
+		case 308: return "Permanent Redirect";
+
+		case 400: return "Bad Request";
+		case 401: return "Unauthorized";
+		case 402: return "Payment Required";
+		case 403: return "Forbidden";
+		case 404: return "Not Found";
+		case 405: return "Method Not Allowed";
+		case 406: return "Not Acceptable";
+		case 407: return "Proxy Authentication Required";
+		case 408: return "Request Timeout";
+		case 409: return "Conflict";
+		case 410: return "Gone";
+		case 411: return "Length Required";
+		case 412: return "Precondition Failed";
+		case 413: return "Request Entity Too Large";
+		case 414: return "Request-URI Too Long";
+		case 415: return "Unsupported Media Type";
+		case 416: return "Requested Range Not Satisfiable";
+		case 417: return "Expectation Failed";
+		case 418: return "I'm a teapot";
+		case 420: return "Enhance your calm";
+		case 422: return "Unprocessable Entity";
+		case 426: return "Upgrade Required";
+		case 429: return "Too many requests";
+		case 431: return "Request Header Fields Too Large";
+		case 449: return "Retry With";
+		case 451: return "Unavailable For Legal Reasons";
+
+		case 500: return "Internal Server Error";
+		case 501: return "Not Implemented";
+		case 502: return "Bad Gateway";
+		case 503: return "Service Unavailable";
+		case 504: return "Gateway Timeout";
+		case 505: return "HTTP Version Not Supported";
+		case 509: return "Bandwidth Limit Exceeded";
+	}
+	return "???";
+}
 
 /* Symbol: find_header
  *
@@ -927,8 +992,6 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	{
 		memset(&res2, 0, sizeof(xh_response2));
 		res2.type = XH_RES;
-		res->status_code = 200;
-		res->status_text = "OK";
 	}
 
 	callback(req, res);
@@ -955,9 +1018,12 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	{
 		char buffer[256];
 
+		const char *status_text = statis_code_to_status_text(res->status);
+		assert(status_text != NULL);
+
 		int n = snprintf(buffer, sizeof(buffer), 
 						"HTTP/1.1 %d %s\r\n", 
-						res->status_code, res->status_text);
+						res->status, status_text);
 		assert(n >= 0);
 
 		if((unsigned int) n > sizeof(buffer)-1)
@@ -1181,9 +1247,10 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 		if(conn->head_received && conn->body_offset + conn->body_length <= conn->in.used)
 		{
 			// The rest of the body arrived.
+			xh_request *req = &conn->request.public;
 
-			conn->request.public.body = conn->in.data + conn->body_offset;
-			conn->request.public.body_len = conn->body_length;
+			req->body = conn->in.data + conn->body_offset;
+			req->body_len = conn->body_length;
 
 			generate_response_by_calling_the_callback(ctx, conn, callback);
 
