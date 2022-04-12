@@ -59,12 +59,13 @@ typedef struct {
 
 typedef void (*xh_callback)(xh_request*, xh_response*);
 
-xh_config xh_get_default_configs();
 const char *xhttp(const char *addr, unsigned short port, xh_callback callback, xh_handle *handle, const xh_config *config);
-void  xh_quit(xh_handle handle);
-void  xh_hadd(xh_response *res, const char *name, const char *valfmt, ...);
-void  xh_hrem(xh_response *res, const char *name);
-const char *xh_hget(void *req_or_res, const char *name);
-_Bool xh_hcmp(const char *a, const char *b);
+void        xh_quit(xh_handle handle);
+xh_config   xh_get_default_configs();
+
+void        xh_header_add(xh_response *res, const char *name, const char *valfmt, ...);
+void        xh_header_rem(xh_response *res, const char *name);
+const char *xh_header_get(void *req_or_res, const char *name);
+_Bool       xh_header_cmp(const char *a, const char *b);
 
 #endif // #ifndef XHTTP_H

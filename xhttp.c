@@ -211,12 +211,12 @@ static const char *statis_code_to_status_text(int code)
 static int find_header(xh_header *headers, int count, const char *name)
 {
 	for(int i = 0; i < count; i += 1)
-		if(xh_hcmp(name, headers[i].name))
+		if(xh_header_cmp(name, headers[i].name))
 			return i;
 	return -1;
 }
 
-/* Symbol: xh_hadd
+/* Symbol: xh_header_add
  *
  *   Add or replace a header into a response object.
  *
@@ -226,7 +226,7 @@ static int find_header(xh_header *headers, int count, const char *name)
  *
  *   - name: Zero-terminated string that contains
  *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
+ *           each header's name is made using [xh_header_cmp],
  *           so it's not case-sensitive.
  *
  *   - valfmt: A printf-like format string that evaluates
@@ -235,13 +235,8 @@ static int find_header(xh_header *headers, int count, const char *name)
  * Returns:
  *   Nothing. The header may or may not be added
  *   (or replaced) to the request.
- *
- * Notes:
- *
- *   - The name "xh_hadd" stands for "XHttp
- *     Header ADD".
  */
-void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
+void xh_header_add(xh_response *res, const char *name, const char *valfmt, ...)
 {
 	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
 
@@ -336,7 +331,7 @@ void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
 	}
 }
 
-/* Symbol: xh_hrem
+/* Symbol: xh_header_rem
  *
  *   Remove a header from a response object.
  *
@@ -347,18 +342,13 @@ void xh_hadd(xh_response *res, const char *name, const char *valfmt, ...)
  *
  *   - name: Zero-terminated string that contains
  *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
+ *           each header's name is made using [xh_header_cmp],
  *           so it's not case-sensitive.
  *
  * Returns:
  *   Nothing.
- *
- * Notes:
- *
- *   - The name "xh_hrem" stands for "XHttp
- *     Header REMove".
  */
-void xh_hrem(xh_response *res, const char *name)
+void xh_header_rem(xh_response *res, const char *name)
 {
 	xh_response2 *res2 = (xh_response2*) ((char*) res - offsetof(xh_response2, public));
 
@@ -383,7 +373,7 @@ void xh_hrem(xh_response *res, const char *name)
 	res2->public.headerc -= 1;
 }
 
-/* Symbol: xh_hget
+/* Symbol: xh_header_get
  *
  *   Find the contents of a header given it's
  *   name from a response or request object.
@@ -397,7 +387,7 @@ void xh_hrem(xh_response *res, const char *name)
  *
  *   - name: Zero-terminated string that contains
  *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
+ *           each header's name is made using [xh_header_cmp],
  *           so it's not case-sensitive.
  *
  * Returns:
@@ -406,14 +396,10 @@ void xh_hrem(xh_response *res, const char *name)
  *   in the request/response.
  *
  * Notes:
- *
- *   - The name "xh_hget" stands for "XHttp
- *     Header GET".
- *
  *   - The returned value is invalidated if
  *     the header is removed using [xh_hrem].
  */
-const char *xh_hget(void *req_or_res, const char *name)
+const char *xh_header_get(void *req_or_res, const char *name)
 {
 	xh_header   *headers;
 	unsigned int headerc;
@@ -445,7 +431,7 @@ const char *xh_hget(void *req_or_res, const char *name)
 	return headers[i].value;
 }
 
-/* Symbol: xh_hcmp
+/* Symbol: xh_header_cmp
  *
  *   This function compares header names.
  *   The comparison isn't case-sensitive.
@@ -460,12 +446,8 @@ const char *xh_hget(void *req_or_res, const char *name)
  *
  * Returns:
  *   1 if the header names match, 0 otherwise.
- *
- * Notes:
- *   - The name "xh_hcmp" stands for "XHttp
- *     Header CoMPare"
  */
-_Bool xh_hcmp(const char *a, const char *b)
+_Bool xh_header_cmp(const char *a, const char *b)
 {
 	if(a == NULL || b == NULL)
 		return a == b;
@@ -1015,7 +997,7 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 
 	_Bool keep_alive;
 	{
-		const char *h_connection = xh_hget(req, "Connection");
+		const char *h_connection = xh_header_get(req, "Connection");
 
 		if(h_connection == NULL)
 			// No [Connection] header. No keep-alive.
@@ -1068,8 +1050,8 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	if(res->close)
 		keep_alive = 0;
 
-	xh_hadd(res, "Content-Length", "%d", res->body_len);
-	xh_hadd(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
+	xh_header_add(res, "Content-Length", "%d", res->body_len);
+	xh_header_add(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
 
 	if(res2.failed)
 	{

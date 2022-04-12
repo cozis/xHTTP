@@ -13,7 +13,7 @@ static void callback(xh_request *req, xh_response *res)
 	res->status = 200;
 	res->body = "Hello, world!";
 	res->body_len = sizeof("Hello, world!")-1;
-	xh_hadd(res, "Content-Type", "text/plain");
+	xh_header_add(res, "Content-Type", "text/plain");
 }
 
 static xh_handle handle;
