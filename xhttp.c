@@ -1275,17 +1275,22 @@ void xh_quit(xh_handle handle)
 	ctx->exiting = 1;
 }
 
-static const char *init(context_t *context, unsigned short port,
-				  		unsigned int maxconns, _Bool reuse,
-				  		int backlog)
+static const char *init(context_t *context, const char *addr, 
+	                    unsigned short port, const xh_config *config)
 {
+	if(config->maximum_parallel_connections == 0)
+		return "The number of maximum parallel connections isn't allowed to be 0";
+
+	if(config->backlog == 0)
+		return "The backlog isn't allowed to be 0";
+
 	{
 		context->fd = socket(AF_INET, SOCK_STREAM, 0);
 
 		if(context->fd < 0)
 			return "Failed to create socket";
 
-		if(reuse)
+		if(config->reuse_address)
 		{
 			int v = 1;
 			if(setsockopt(context->fd, SOL_SOCKET,
@@ -1296,13 +1301,23 @@ static const char *init(context_t *context, unsigned short port,
 			}
 		}
 
+		struct in_addr inp;
+		if(addr == NULL)
+			inp.s_addr = INADDR_ANY;
+		else
+			if(!inet_aton(addr, &inp))
+			{
+				(void) close(context->fd);
+				return "Malformed IPv4 address";
+			}
+
 		struct sockaddr_in temp;
 
 		memset(&temp, 0, sizeof(temp));
 
-		temp.sin_family      = AF_INET;
-		temp.sin_port        = htons(port);
-		temp.sin_addr.s_addr = INADDR_ANY;
+		temp.sin_family = AF_INET;
+		temp.sin_port = htons(port);
+		temp.sin_addr = inp;
 
 		if(bind(context->fd, (struct sockaddr*) &temp, sizeof(temp)))
 		{
@@ -1310,7 +1325,7 @@ static const char *init(context_t *context, unsigned short port,
 			return "Failed to bind to address";
 		}
 
-		if(listen(context->fd, backlog))
+		if(listen(context->fd, config->backlog))
 		{
 			(void) close(context->fd);
 			return "Failed to listen for connections";
@@ -1340,7 +1355,7 @@ static const char *init(context_t *context, unsigned short port,
 	}
 
 	{
-		context->pool = malloc(maxconns * sizeof(conn_t));
+		context->pool = malloc(config->maximum_parallel_connections * sizeof(conn_t));
 
 		if(context->pool == NULL)
 		{
@@ -1351,30 +1366,44 @@ static const char *init(context_t *context, unsigned short port,
 
 		context->pool[0].prev = NULL;
 
-		for(unsigned int i = 0; i < maxconns; i += 1)
+		for(unsigned int i = 0; i < config->maximum_parallel_connections; i += 1)
 		{
 			context->pool[i].fd = -1;
 			context->pool[i].next = context->pool + i + 1;
 			context->pool[i].prev = NULL;
 		}
 
-		context->pool[maxconns-1].next = NULL;
+		context->pool[config->maximum_parallel_connections-1].next = NULL;
 
 		context->freelist = context->pool;
 	}
 
 	context->connum = 0;
-	context->maxconns = maxconns;
+	context->maxconns = config->maximum_parallel_connections;
 	context->exiting = 0;
 	return NULL;
 }
 
-const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*), unsigned short port, unsigned int maxconns, _Bool reuse)
+xh_config xh_get_default_configs()
 {
+	return (xh_config) {
+		.reuse_address = 1,
+		.maximum_parallel_connections = 512,
+		.backlog = 128,
+	};
+}
+
+const char *xhttp(const char *addr, unsigned short port, 
+				  xh_callback callback, xh_handle *handle, 
+				  const xh_config *config)
+{
+	xh_config dummy = xh_get_default_configs();
+	if(config == NULL)
+		config = &dummy;
+
 	context_t context;
 
-	int backlog = 256;
-	const char *error = init(&context, port, maxconns, reuse, backlog);
+	const char *error = init(&context, addr, port, config);
 
 	if(error != NULL)
 		return error;
@@ -1441,7 +1470,7 @@ const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*)
 		}
 	}
 
-	for(unsigned int i = 0; i < maxconns; i += 1)
+	for(unsigned int i = 0; i < config->maximum_parallel_connections; i += 1)
 		if(context.pool[i].fd != -1)
 			close_connection(&context, context.pool + i);
 

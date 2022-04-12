@@ -1,1 +1,1 @@
-gcc example.c xhttp.c -o example -Wall -Wextra -O2
+gcc example.c xhttp.c -o example -Wall -Wextra -g

@@ -29,7 +29,7 @@ int main()
 	signal(SIGQUIT, handle_sigterm);
 	signal(SIGINT,  handle_sigterm);
 
-	const char *error = xhttp(&handle, callback, 8080, 512, 1);
+	const char *error = xhttp(NULL, 8080, callback, &handle, NULL);
 	if(error != NULL)
 	{
 		fprintf(stderr, "ERROR: %s\n", error);

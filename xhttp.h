@@ -51,7 +51,16 @@ typedef struct {
 	_Bool close;
 } xh_response;
 
-const char *xhttp(xh_handle *handle, void (*callback)(xh_request*, xh_response*), unsigned short port, unsigned int maxconns, _Bool reuse);
+typedef struct {
+	_Bool        reuse_address;
+	unsigned int maximum_parallel_connections;
+	unsigned int backlog;
+} xh_config;
+
+typedef void (*xh_callback)(xh_request*, xh_response*);
+
+xh_config xh_get_default_configs();
+const char *xhttp(const char *addr, unsigned short port, xh_callback callback, xh_handle *handle, const xh_config *config);
 void  xh_quit(xh_handle handle);
 void  xh_hadd(xh_response *res, const char *name, const char *valfmt, ...);
 void  xh_hrem(xh_response *res, const char *name);
