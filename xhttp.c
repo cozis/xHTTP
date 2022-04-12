@@ -1166,7 +1166,11 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 			{
 				uint32_t new_size = (b->size == 0) ? 512 : (2 * b->size);
 
-				void *temp = realloc(b->data, new_size);
+				// NOTE: We allocate one extra byte because this
+				//       way we're sure that any sub-string of the
+				//       buffer can be safely made zero-terminated
+				//       by writing a zero after it temporarily.
+				void *temp = realloc(b->data, new_size + 1);
 
 				if(temp == NULL)
 				{
@@ -1297,7 +1301,14 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 			req->body = conn->in.data + conn->body_offset;
 			req->body_len = conn->body_length;
 
+			// Make the body temporarily zero-terminated.
+			char q = conn->in.data[conn->body_offset + conn->body_length];
+			conn->in.data[conn->body_offset + conn->body_length] = '\0';
+
 			generate_response_by_calling_the_callback(ctx, conn, callback);
+
+			// Restore the byte after the body.
+			conn->in.data[conn->body_offset + conn->body_length] = q;
 
 			// Remove the request from the input buffer by
 			// copying back its remaining contents.
