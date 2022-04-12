@@ -881,36 +881,13 @@ static void append(conn_t *conn, const char *str, int len)
 	return;
 }
 
-static void xh_response_init(xh_response2 *res)
+static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, xh_response*))
 {
-	res->public.status_code = -1;
-	res->public.status_text = NULL;
-	res->public.headers = NULL;
-	res->public.headerc = 0;
-	res->public.body = NULL;
-	res->public.body_len = 0;
-	res->public.close = 0;
-	res->type = XH_RES;
-	res->headers = NULL;
-	res->headerc = 0;
-	res->capacity = 0;
-	res->failed = 0;
-}
+	xh_request *req = &conn->request.public;
 
-static void xh_response_deinit(xh_response2 *res)
-{
-	for(unsigned int i = 0; i < res->headerc; i += 1)
-		free(res->headers[i].name);
-
-	if(res->headers != NULL)
-		free(res->headers);
-}
-
-static void respond(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, xh_response*))
-{
 	_Bool keep_alive;
 	{
-		const char *h_connection = xh_hget(&conn->request.public, "Connection");
+		const char *h_connection = xh_hget(req, "Connection");
 
 		if(h_connection == NULL)
 			// No [Connection] header. No keep-alive.
@@ -936,33 +913,39 @@ static void respond(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, 
 			keep_alive = 0;
 	}
 
-	_Bool head_only = conn->request.public.method_id == XH_HEAD;
+	_Bool head_only = req->method_id == XH_HEAD;
 
 	if(head_only)
 	{
-		conn->request.public.method_id = XH_GET;
-		conn->request.public.method = "GET";
-		conn->request.public.method_len = sizeof("GET")-1;
+		req->method_id = XH_GET;
+		req->method = "GET";
+		req->method_len = sizeof("GET")-1;
 	}
 
-	xh_response2 res;
-	xh_response_init(&res);
-
-	callback(&conn->request.public, (xh_response*) &res.public);
-
-	if(conn->request.public.headers != NULL)
+	xh_response2 res2;
+	xh_response *res = &res2.public;
 	{
-		free(conn->request.public.headers);
-		conn->request.public.headers = NULL;
+		memset(&res2, 0, sizeof(xh_response2));
+		res2.type = XH_RES;
+		res->status_code = 200;
+		res->status_text = "OK";
 	}
 
-	if(res.public.close)
+	callback(req, res);
+
+	if(req->headers != NULL)
+	{
+		free(req->headers);
+		req->headers = NULL;
+	}
+
+	if(res->close)
 		keep_alive = 0;
 
-	xh_hadd(&res.public, "Content-Length", "%d", res.public.body_len);
-	xh_hadd(&res.public, "Connection", keep_alive ? "Keep-Alive" : "Close");
+	xh_hadd(res, "Content-Length", "%d", res->body_len);
+	xh_hadd(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
 
-	if(res.failed)
+	if(res2.failed)
 	{
 		// Failed to build the response. We'll send a 500.
 		append(conn, "HTTP/1.1 500 Internal Server Error\r\n", -1);
@@ -972,7 +955,9 @@ static void respond(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, 
 	{
 		char buffer[256];
 
-		int n = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d %s\r\n", res.public.status_code, res.public.status_text);
+		int n = snprintf(buffer, sizeof(buffer), 
+						"HTTP/1.1 %d %s\r\n", 
+						res->status_code, res->status_text);
 		assert(n >= 0);
 
 		if((unsigned int) n > sizeof(buffer)-1)
@@ -980,21 +965,27 @@ static void respond(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, 
 
 		append(conn, buffer, n);
 
-		for(unsigned int i = 0; i < res.headerc; i += 1)
+		for(unsigned int i = 0; i < res2.headerc; i += 1)
 		{
-			append(conn, res.headers[i].name, res.headers[i].name_len);
+			append(conn, res2.headers[i].name, res2.headers[i].name_len);
 			append(conn, ": ", 2);
-			append(conn, res.headers[i].value, res.headers[i].value_len);
+			append(conn, res2.headers[i].value, res2.headers[i].value_len);
 			append(conn, "\r\n", 2);
 		}
 
 		append(conn, "\r\n", 2);
 
-		if(head_only == 0 && res.public.body != NULL && res.public.body_len > 0)
-			append(conn, res.public.body, res.public.body_len);
+		if(head_only == 0 && res->body != NULL && res->body_len > 0)
+			append(conn, res->body, res->body_len);
 	}
 
-	xh_response_deinit(&res);
+	{
+		for(unsigned int i = 0; i < res2.headerc; i += 1)
+		free(res2.headers[i].name);
+
+		if(res2.headers != NULL)
+			free(res2.headers);
+	}
 
 	conn->served += 1;
 
@@ -1194,7 +1185,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 			conn->request.public.body = conn->in.data + conn->body_offset;
 			conn->request.public.body_len = conn->body_length;
 
-			respond(ctx, conn, callback);
+			generate_response_by_calling_the_callback(ctx, conn, callback);
 
 			// Remove the request from the input buffer by
 			// copying back its remaining contents.
