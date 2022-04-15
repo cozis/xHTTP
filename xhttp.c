@@ -90,13 +90,49 @@ typedef struct {
 
 typedef struct conn_t conn_t;
 struct conn_t {
+
+	// This is used to hold a free-list
+	// of [conn_t] structures.
 	conn_t *next;
-	buffer_t in;
-	buffer_t out;
-	int fd, served;
+
+	// I/O buffers required for async.
+	// reads and writes.
+	buffer_t in, out;
+
+	// Connection's socked file 
+	// descriptor.
+	int fd;
+
+	// Number of resources served to
+	// this client. This is used to
+	// determine which connections to
+	// keep alive.
+	int served;
+
+	// This flags can be set after a
+	// response is written to the output
+	// buffer. If set, then all reads
+	// from the client stop and when the
+	// output buffer is flushed the 
+	// connection is closed.
 	bool close_when_uploaded;
+
+	// The way writes to the output buffer
+	// occur is through the [append] function. 
+	// Since the output buffer may beed to 
+	// be resized, the [append] operation 
+	// may fail. Since checking every time 
+	// for the return value makes the code 
+	// very verbose, instead of returning 
+	// an error value, this flag is set. If 
+	// this flag is set then [append] operations 
+	// have no effect and when [upload] is 
+	// called it returns the error that the 
+	// first [append] that failed would have
+	// returned.
 	bool failed_to_append;
-	bool head_received;
+
+	bool   head_received;
 	uint32_t body_offset;
     uint32_t body_length;
     xh_request2  request;
