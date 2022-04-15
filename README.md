@@ -75,4 +75,4 @@ $ gcc main.c xhttp.c -o main
 You can find a slightly more complete example in `example.c`.
 
 ## Contributing
-Feel free to propose any changes! Though I'd advise to open an issue before sending any non-trivial changes.
+Feel free to propose any changes or send in patches! Though I'd advise to open an issue before sending any non-trivial changes, just to make sure we're on the same page first!
