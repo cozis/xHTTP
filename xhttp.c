@@ -37,8 +37,7 @@
  * | it can, it gives it a [conn_t] structure and registers it into the event loop.             | *
  * |                                                                                            | *
  * | When the event loop signals that a connection sent some data, the data is copied from the  | *
- * | kernel into the user-space buffer inside the [conn_t] structure. The retrieved data has a  | *
- * | different meaning based on the parsing state of the connection. If the head of the request | *
+ * | kernel into the user-space buffer of the [conn_t] structure. If the head of the request    | *
  * | wasn't received or was received partially, the character sequence "\r\n\r\n" (a blank line)| *
  * | is searched for inside the downloaded data. The "\r\n\r\n" token signifies the end of the  | *
  * | request's head and the start of it's body. If the head wasn't received the server goes     | *
@@ -50,10 +49,10 @@
  * | One thing to note is that multiple requests could be read from a single [recv], making it  | *
  * | necessary to perform these operations on the input buffer in a loop.                       | *
  * |                                                                                            | *
- * | If at any point the request is determined to be invalid or an internal error occurres,     | *
- * | this process is aborted and a 4xx or 5xx response is sent.                                 | *
+ * | If at any point of this process the request is determined to be invalid or an internal     | *
+ * | error occurres, a 4xx or 5xx response is sent.                                             | *
  * |                                                                                            | *
- * | While handling input events, the response isn't sent directly to the kernel buffer,        | *
+ * | While handling data input events, the response is never sent directly to the kernel buffer,| *
  * | because the call to [send] could block the server. Instead, the response is written to the | *
  * | [conn_t]'s output buffer. This buffer is only flushed to the kernel when a write-ready     | *
  * | event is triggered for that connection.                                                    | *
