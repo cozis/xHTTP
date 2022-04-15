@@ -8,78 +8,82 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "xhttp.h"
 
-/* +--------------------------------------------------+
- * |                     OVERVIEW                     |
- * | The server starts inside the function [xhttp],   |
- * | where the server waits in a loop for events      |
- * | provided by epoll (the event loop).              |
- * |                                                  |
- * | Each connection to a client is represented by a  |
- * | [conn_t] structure, which is basically composed  |
- * | by a buffer of input data, a buffer of output    |
- * | data, the parsing state of the input buffer plus |
- * | some more fields required to hold the state of   |
- * | the parsing and to manage the connection. These  |
- * | structures are preallocated at start-up time and |
- * | determine the capacity of the server.            |
- * |                                                  |
- * | Whenever a client requests to connect, the server|
- * | decides if it can handle it or not. If it can,   |
- * | then it gives it a [conn_t] structure and        |
- * | registers it into the event loop.                |
- * |                                                  |
+/* +---------------------------------------------------+
+ * |                     OVERVIEW                      |
+ * | The server starts inside the function [xhttp],    |
+ * | where the server waits in a loop for events       |
+ * | provided by epoll (the event loop).               |
+ * |                                                   |
+ * | Each connection to a client is represented by a   |
+ * | [conn_t] structure, which is basically composed by|
+ * | a buffer of input data, a buffer of output data,  |
+ * | the parsing state of the input buffer plus some   |
+ * | more fields required to hold the state of the     |
+ * | parsing and to manage the connection.             |
+ * | These structures are preallocated at start-up time|
+ * | and determine the capacity of the server.         |
+ * |                                                   |
+ * | Whenever a client requests to connect, the server |
+ * | decides if it can handle it or not. If it can,    |
+ * | then it gives it a [conn_t] structure and         |
+ * | registers it into the event loop.                 |
+ * |                                                   |
  * | When the event loop signals that a connection sent|
- * | some data, the data is copied from the kernel    |
- * | into the user-space buffer inside the [conn_t]   |
- * | structure. The retrieved data has a different    |
- * | meaning based on the parsing state of the        |
- * | connection. If the head of the request wasn't    |
- * | received or was received partially, then         |
- * | the character sequence "\r\n\r\n" (a blank line) |
- * | is searched for inside the downloaded data.      |
- * | The "\r\n\r\n" token signifies the end of the    |
- * | request's head and the start of it's body,       |
- * | therefore if it isn't found, the head wasn't     |
- * | fully received yet. If the head wasn't received  |
- * | the server goes back to waiting for new events.  |
- * | If the token is found, then the head can be      |
- * | parsed. Once the head is parsed, the length of   |
- * | the request's body is determined. If the whole   |
- * | body of the request was received with the head,  |
- * | then it can already be handled. If the body      |
- * | wasn't received, then the servers goes back to   |
- * | waiting for events until the rest of the body    |
- * | is received.                                     |
- * | When the body is fully received, then the user-  |
- * | provided callback can be called to generate a    |
- * | response.                                        |
- * | One thing to note is that multiple requests could|
- * | be read from a single [recv], making it necessary|
- * | to perform these operations on the input buffer  |
- * | in a loop.                                       |
- * |                                                  |
- * | If at any point the request is determined to be  |
- * | invalid or an internal error occurres, then this |
- * | process is aborted and a 4xx or 5xx response is  |
- * | sent.                                            |
- * |                                                  |
- * | While handling input events, the response isn't  |
- * | sent directly to the kernel buffer, because the  |
- * | call to [send] could block the server. Instead,  |
- * | the response is written to the [conn_t]'s output |
- * | buffer. This buffer is only flushed to the kernel|
- * | when a write-ready event is triggered for that   |
- * | connection.                                      |
- * +--------------------------------------------------+
+ * | some data, the data is copied from the kernel     |
+ * | into the user-space buffer inside the [conn_t]    |
+ * | structure. The retrieved data has a different     |
+ * | meaning based on the parsing state of the         |
+ * | connection. If the head of the request wasn't     |
+ * | received or was received partially, then          |
+ * | the character sequence "\r\n\r\n" (a blank line)  |
+ * | is searched for inside the downloaded data.       |
+ * | The "\r\n\r\n" token signifies the end of the     |
+ * | request's head and the start of it's body,        |
+ * | therefore if it isn't found, the head wasn't      |
+ * | fully received yet. If the head wasn't received   |
+ * | the server goes back to waiting for new events.   |
+ * | If the token is found, then the head can be       |
+ * | parsed. Once the head is parsed, the length of    |
+ * | the request's body is determined. If the whole    |
+ * | body of the request was received with the head,   |
+ * | then it can already be handled. If the body       |
+ * | wasn't received, then the servers goes back to    |
+ * | waiting for events until the rest of the body     |
+ * | is received.                                      |
+ * | When the body is fully received, then the user-   |
+ * | provided callback can be called to generate a     |
+ * | response.                                         |
+ * | One thing to note is that multiple requests could |
+ * | be read from a single [recv], making it necessary |
+ * | to perform these operations on the input buffer   |
+ * | in a loop.                                        |
+ * |                                                   |
+ * | If at any point the request is determined to be   |
+ * | invalid or an internal error occurres, then this  |
+ * | process is aborted and a 4xx or 5xx response is   |
+ * | sent.                                             |
+ * |                                                   |
+ * | While handling input events, the response isn't   |
+ * | sent directly to the kernel buffer, because the   |
+ * | call to [send] could block the server. Instead,   |
+ * | the response is written to the [conn_t]'s output  |
+ * | buffer. This buffer is only flushed to the kernel |
+ * | when a write-ready event is triggered for that    |
+ * | connection.                                       |
+ * +---------------------------------------------------+
  */
 
-typedef enum { XH_REQ, XH_RES } struct_type_t;
+typedef enum { 
+	XH_REQ, 
+	XH_RES 
+} struct_type_t;
 
 typedef struct {
 	struct_type_t    type;
@@ -87,7 +91,7 @@ typedef struct {
 	xh_header    *headers;
 	unsigned int  headerc;
 	unsigned int capacity;
-	_Bool failed;
+	bool failed;
 } xh_response2;
 
 typedef struct {
@@ -108,16 +112,16 @@ struct conn_t {
 	buffer_t in;
 	buffer_t out;
 	int fd, served;
-	_Bool close_when_uploaded;
-	_Bool failed_to_append;
-	_Bool head_received;
+	bool close_when_uploaded;
+	bool failed_to_append;
+	bool head_received;
 	uint32_t body_offset;
     uint32_t body_length;
     xh_request2  request;
 };
 
 typedef struct {
-	_Bool exiting;
+	bool exiting;
 	int fd, epfd, maxconns, connum;
 	conn_t *pool, *freelist;
 } context_t;
@@ -447,7 +451,7 @@ const char *xh_header_get(void *req_or_res, const char *name)
  * Returns:
  *   1 if the header names match, 0 otherwise.
  */
-_Bool xh_header_cmp(const char *a, const char *b)
+bool xh_header_cmp(const char *a, const char *b)
 {
 	if(a == NULL || b == NULL)
 		return a == b;
@@ -458,7 +462,7 @@ _Bool xh_header_cmp(const char *a, const char *b)
 	return tolower(*a) == tolower(*b);
 }
 
-static _Bool set_non_blocking(int fd)
+static bool set_non_blocking(int fd)
 {
 	int flags = fcntl(fd, F_GETFL);
 
@@ -549,22 +553,22 @@ static void close_connection_(context_t *ctx, conn_t *conn, const char *file, in
 #define close_connection(ctx, conn) close_connection_(ctx, conn, __FILE__, __LINE__)
 #endif
 
-static _Bool is_uppercase_alpha(char c)
+static bool is_uppercase_alpha(char c)
 {
 	return c >= 'A' && c <= 'Z';
 }
 
-static _Bool is_digit(char c)
+static bool is_digit(char c)
 {
 	return c >= '0' && c <= '9';
 }
 
-static _Bool is_space(char c)
+static bool is_space(char c)
 {
 	return c == ' ';
 }
 
-static void skip(char *str, uint32_t len, uint32_t *i, _Bool not, _Bool (*test)(char))
+static void skip(char *str, uint32_t len, uint32_t *i, bool not, bool (*test)(char))
 {
 	if(not)
 		while(*i < len && !test(str[*i]))
@@ -581,7 +585,7 @@ static void skip_until(char *str, uint32_t len, uint32_t *i, char c)
 }
 
 struct parse_err_t {
-	_Bool   internal;
+	bool   internal;
 	char        *msg;
 	unsigned int len;
 };
@@ -775,7 +779,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 	// Validate the header.
 	{
-		_Bool unknown_method = 0;
+		bool unknown_method = 0;
 
 		#define PAIR(p, q) (uint64_t) (((uint64_t) p << 32) | (uint64_t) q)
 		switch(PAIR(req->method[0], method_length))
@@ -802,7 +806,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 	// Validate the HTTP version
 	{
-		_Bool bad_version = 0;
+		bool bad_version = 0;
 		switch(version_length)
 		{
 			case sizeof("HTTP/M.N")-1:
@@ -890,7 +894,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 	#undef INTERNAL_FAILURE
 }
 
-static _Bool upload(conn_t *conn)
+static bool upload(conn_t *conn)
 {
 	if(conn->failed_to_append)
 		return 0;
@@ -995,7 +999,7 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 {
 	xh_request *req = &conn->request.public;
 
-	_Bool keep_alive;
+	bool keep_alive;
 	{
 		const char *h_connection = xh_header_get(req, "Connection");
 
@@ -1023,7 +1027,7 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 			keep_alive = 0;
 	}
 
-	_Bool head_only = req->method_id == XH_HEAD;
+	bool head_only = req->method_id == XH_HEAD;
 
 	if(head_only)
 	{

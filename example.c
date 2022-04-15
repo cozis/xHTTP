@@ -7,17 +7,19 @@
 #include <stdio.h>
 #include "xhttp.h"
 
-#define RESPONSE "Hello, world!"
+static xh_handle handle;
 
 static void callback(xh_request *req, xh_response *res)
 {
+	#define RESPONSE "Hello, world!"
+
 	res->status = 200;
+
 	res->body = RESPONSE;
 	res->body_len = sizeof(RESPONSE)-1;
+	
 	xh_header_add(res, "Content-Type", "text/plain");
 }
-
-static xh_handle handle;
 
 static void handle_sigterm(int signum) 
 {
