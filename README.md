@@ -1,5 +1,5 @@
 # xHTTP
-xHTTP is an HTTP server library designed to be lightweight, fast and easy to use. 
+xHTTP is an HTTP server library designed to be lightweight, fast, robust and easy to use. 
 
 **NOTE**: It's still in the early sperimentation phase (I'm still figuring things out!)
 
@@ -56,7 +56,7 @@ int main()
 {
     const char    *addr = NULL;
     unsigned short port = 8080;
-    
+
     const char *error = xhttp(addr, port, callback, NULL, NULL);
 
     if(error != NULL)
