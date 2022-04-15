@@ -15,52 +15,53 @@
 #include <netinet/in.h>
 #include "xhttp.h"
 
-/*                                          __ _________________ 
- *                                   __ __ / // /_  __/_  __/ _ \
- *                                   \ \ // _  / / /   / / / ___/
- *                                  /_\_\/_//_/ /_/   /_/ /_/     
- *                             
- * +--------------------------------------------------------------------------------------------+
- * |                                                                                            |
- * |                                          OVERVIEW                                          |
- * |                                                                                            |
- * | The logic starts inside the [xhttp] function, where the server waits in a loop for events  |
- * | provided by epoll (the event loop).                                                        |
- * |                                                                                            |
- * | Each connection to a client is represented by a [conn_t] structure, which is basically     |
- * | composed by a buffer of input data, a buffer of output data, the parsing state of the      |
- * | input buffer plus some more fields required to hold the state of the parsing and to manage |
- * | the connection. These structures are preallocated at start-up time and determine the       |
- * | capacity of the server.                                                                    |
- * |                                                                                            |
- * | Whenever a client requests to connect, the server decides if it can handle it or not. If   |
- * | it can, then it gives it a [conn_t] structure and registers it into the event loop.        |
- * |                                                                                            |
- * | When the event loop signals that a connection sent some data, the data is copied from the  |
- * | kernel into the user-space buffer inside the [conn_t] structure. The retrieved data has a  |
- * | different meaning based on the parsing state of the connection. If the head of the request |
- * | wasn't received or was received partially, then the character sequence "\r\n\r\n" (a blank |
- * | line) is searched for inside the downloaded data. The "\r\n\r\n" token signifies the end   |
- * | of the request's head and the start of it's body, therefore if it isn't found, the head    |
- * | wasn't fully received yet. If the head wasn't received the server goes back to waiting for |
- * | new events. If the token is found, then the head can be parsed. Once the head is parsed,   |
- * | the length of the request's body is determined. If the whole body of the request was       |
- * | received with the head, then it can already be handled. If the body wasn't received, then  |
- * | the servers goes back to waiting for events until the rest of the body is received.        |
- * | When the body is fully received, then the user-provided callback can be called to generate |
- * | a response.                                                                                |
- * | One thing to note is that multiple requests could be read from a single [recv], making it  |
- * | necessary to perform these operations on the input buffer in a loop.                       |
- * |                                                                                            |
- * | If at any point the request is determined to be invalid or an internal error occurres,     |
- * | then this process is aborted and a 4xx or 5xx response is sent.                            |
- * |                                                                                            |
- * | While handling input events, the response isn't sent directly to the kernel buffer,        |
- * | because the call to [send] could block the server. Instead, the response is written to the |
- * | [conn_t]'s output buffer. This buffer is only flushed to the kernel when a write-ready     |
- * | event is triggered for that connection.                                                    |
- * |                                                                                            |
- * +--------------------------------------------------------------------------------------------+ */
+/*                                          __ _________________                                  *
+ *                                   __ __ / // /_  __/_  __/ _ \                                 *
+ *                                   \ \ // _  / / /   / / / ___/                                 *
+ *                                  /_\_\/_//_/ /_/   /_/ /_/                                     *
+ *                                                                                                *
+ * +--------------------------------------------------------------------------------------------+ *
+ * |                                                                                            | *
+ * |                                          OVERVIEW                                          | *
+ * |                                                                                            | *
+ * | The logic starts inside the [xhttp] function, where the server waits in a loop for events  | *
+ * | provided by epoll (the event loop).                                                        | *
+ * |                                                                                            | *
+ * | Each client connection is represented by a [conn_t] structure, which is basically composed | *
+ * | by a buffer of input data, a buffer of output data, the parsing state of the input buffer  | *
+ * | plus some more fields required to hold the state of the parsing and to manage the          | *
+ * | connection. These structures are preallocated at start-up time and determine the capacity  | *
+ * | of the server.                                                                             | *
+ * |                                                                                            | *
+ * | Whenever a client requests to connect, the server decides if it can handle it or not. If   | *
+ * | it can, then it gives it a [conn_t] structure and registers it into the event loop.        | *
+ * |                                                                                            | *
+ * | When the event loop signals that a connection sent some data, the data is copied from the  | *
+ * | kernel into the user-space buffer inside the [conn_t] structure. The retrieved data has a  | *
+ * | different meaning based on the parsing state of the connection. If the head of the request | *
+ * | wasn't received or was received partially, then the character sequence "\r\n\r\n" (a blank | *
+ * | line) is searched for inside the downloaded data. The "\r\n\r\n" token signifies the end   | *
+ * | of the request's head and the start of it's body, therefore if it isn't found, the head    | *
+ * | wasn't fully received yet. If the head wasn't received the server goes back to waiting for | *
+ * | new events. If the token is found, then the head can be parsed. Once the head is parsed,   | *
+ * | the length of the request's body is determined. If the whole body of the request was       | *
+ * | received with the head, then it can already be handled. If the body wasn't received, then  | *
+ * | the servers goes back to waiting for events until the rest of the body is received.        | *
+ * | When the body is fully received, then the user-provided callback can be called to generate | *
+ * | a response.                                                                                | *
+ * | One thing to note is that multiple requests could be read from a single [recv], making it  | *
+ * | necessary to perform these operations on the input buffer in a loop.                       | *
+ * |                                                                                            | *
+ * | If at any point the request is determined to be invalid or an internal error occurres,     | *
+ * | then this process is aborted and a 4xx or 5xx response is sent.                            | *
+ * |                                                                                            | *
+ * | While handling input events, the response isn't sent directly to the kernel buffer,        | *
+ * | because the call to [send] could block the server. Instead, the response is written to the | *
+ * | [conn_t]'s output buffer. This buffer is only flushed to the kernel when a write-ready     | *
+ * | event is triggered for that connection.                                                    | *
+ * |                                                                                            | *
+ * +--------------------------------------------------------------------------------------------+ *
+ *                                                                                                */
 
 typedef enum { 
 	XH_REQ, 
@@ -89,7 +90,6 @@ typedef struct {
 
 typedef struct conn_t conn_t;
 struct conn_t {
-	conn_t *prev;
 	conn_t *next;
 	buffer_t in;
 	buffer_t out;
@@ -1406,13 +1406,10 @@ static const char *init(context_t *context, const char *addr,
 			return "Failed to allocate connection pool";
 		}
 
-		context->pool[0].prev = NULL;
-
 		for(unsigned int i = 0; i < config->maximum_parallel_connections; i += 1)
 		{
 			context->pool[i].fd = -1;
 			context->pool[i].next = context->pool + i + 1;
-			context->pool[i].prev = NULL;
 		}
 
 		context->pool[config->maximum_parallel_connections-1].next = NULL;
