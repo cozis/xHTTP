@@ -56,7 +56,8 @@ int main()
 {
     const char    *addr = NULL;
     unsigned short port = 8080;
-    const char *error = xhttp(addr, port, callback, &handle, NULL);
+    
+    const char *error = xhttp(addr, port, callback, NULL, NULL);
 
     if(error != NULL)
     {
