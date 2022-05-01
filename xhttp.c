@@ -10,10 +10,14 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 #include <sys/epoll.h>
+#include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/sendfile.h>
 #include <netinet/in.h>
 #include "xhttp.h"
+
 
 /*                                          __ _________________                                  *
  *                                   __ __ / // /_  __/_  __/ _ \                                 *
@@ -128,6 +132,11 @@ struct conn_t {
 	// first [append] that failed would have
 	// returned.
 	bool failed_to_append;
+
+	bool sending_from_fd;
+	int  file_fd;
+	long file_len;
+	long file_off;
 
 	bool   head_received;
 	uint32_t body_offset;
@@ -509,6 +518,9 @@ static void accept_connection(context_t *ctx)
 
 	conn_t *conn = ctx->freelist;
 	ctx->freelist = conn->next;
+
+	assert(((intptr_t) conn & 
+		    (intptr_t) 1) == 0);
 
 	memset(conn, 0, sizeof(conn_t));
 	conn->fd = cfd;
@@ -914,33 +926,68 @@ static bool upload(conn_t *conn)
 	if(conn->failed_to_append)
 		return 0;
 
-	uint32_t sent, total;
-
-	sent = 0;
-	total = conn->out.used;
-
-	if(total == 0)
-		return 1;
-
-	while(sent < total)
+	
+	if(conn->out.used > 0)
 	{
-		int n = send(conn->fd, conn->out.data + sent, total - sent, 0);
+		/* Flush the output buffer. */
+		uint32_t sent, total;
 
-		if(n < 0)
+		sent = 0;
+		total = conn->out.used;
+
+		if(total == 0)
+			return 1;
+
+		while(sent < total)
 		{
-			if(errno == EAGAIN || errno == EWOULDBLOCK)
-				break;
+			int n = send(conn->fd, conn->out.data + sent, total - sent, 0);
 
-			// ERROR!
-			return 0;
+			if(n < 0)
+			{
+				if(errno == EAGAIN || errno == EWOULDBLOCK)
+					break;
+
+				// ERROR!
+				return 0;
+			}
+
+			assert(n >= 0);
+			sent += n;
 		}
 
-		assert(n >= 0);
-		sent += n;
+		memmove(conn->out.data, conn->out.data + sent, total - sent);
+		conn->out.used -= sent;
 	}
 
-	memmove(conn->out.data, conn->out.data + sent, total - sent);
-	conn->out.used -= sent;
+	if(conn->sending_from_fd && conn->out.used == 0)
+	{
+		/* Tell the kernel to use sendfile */
+		do
+		{
+			ssize_t n = sendfile(conn->fd, conn->file_fd, NULL, 
+				                 conn->file_len - conn->file_off);
+			
+			if(n < 0)
+			{
+				if(errno == EAGAIN)
+					// Would block, we're done.
+					break;
+
+				// An error occurred.
+				return 0;
+			}
+
+			conn->file_off += n;
+		}
+		while(conn->file_off < conn->file_len);
+
+		if(conn->file_off == conn->file_len)
+		{
+			// Done sending the file.
+			(void) close(conn->file_fd);
+			conn->sending_from_fd = 0;
+		}
+	}
 	return 1;
 }
 
@@ -1053,10 +1100,9 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 
 	xh_response2 res2;
 	xh_response *res = &res2.public;
-	{
-		memset(&res2, 0, sizeof(xh_response2));
-		res2.type = XH_RES;
-	}
+	memset(&res2, 0, sizeof(xh_response2));
+	res2.type = XH_RES;
+	res->body.len = -1;
 
 	callback(req, res);
 
@@ -1069,7 +1115,60 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	if(res->close)
 		keep_alive = 0;
 
-	xh_header_add(res, "Content-Length", "%d", res->body_len);
+	if(res2.failed)
+	{
+		// Failed to build the response.
+		append(conn, "HTTP/1.1 500 Internal Server Error\r\n", -1);
+		append(conn, keep_alive ? "Connection: Keep-Alive\r\n" : "Connection: Close\r\n", -1);
+		goto done;
+	}
+
+	if(res->file != NULL)
+	{
+		int fd = open(res->file, O_RDONLY);
+		if(fd < 0) {
+			switch(errno) {
+				case EACCES: append(conn, "HTTP/1.1 403 Forbidden\r\n\r\n", -1); break;
+				case ENOENT: append(conn, "HTTP/1.1 404 Not Found\r\n\r\n", -1); break;
+				default: append(conn, "HTTP/1.1 500 Internal Server Error\r\n\r\n", -1); break;
+			}
+			goto done;
+		}
+
+		struct stat buf;
+		if(fstat(fd, &buf))
+		{
+			append(conn, "HTTP/1.1 500 Internal Server Error\r\n\r\n", -1);
+			goto done;
+		}
+
+		if(!S_ISREG(buf.st_mode))
+		{
+			// Path doesn't refer to a regular file.
+			append(conn, "HTTP/1.1 500 Internal Server Error\r\n\r\n", -1);
+			goto done;
+		}
+
+		conn->file_fd = fd;
+		conn->file_off = 0;
+		conn->file_len = buf.st_size;
+		conn->sending_from_fd = 1;
+	}
+
+	/* Determine content-length */
+	int content_length;
+	if(res->file != NULL)
+		content_length = conn->file_len;
+	else if(res->body.str != NULL)
+	{
+		if(res->body.len < 0)
+			content_length = strlen(res->body.str);
+		else
+			content_length = res->body.len;
+	}
+	else content_length = 0;
+
+	xh_header_add(res, "Content-Length", "%d", content_length);
 	xh_header_add(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
 
 	if(res2.failed)
@@ -1085,9 +1184,10 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 		const char *status_text = statis_code_to_status_text(res->status);
 		assert(status_text != NULL);
 
-		int n = snprintf(buffer, sizeof(buffer), 
-						"HTTP/1.1 %d %s\r\n", 
-						res->status, status_text);
+		int n = snprintf(
+			buffer, sizeof(buffer), 
+			"HTTP/1.1 %d %s\r\n", 
+			res->status, status_text);
 		assert(n >= 0);
 
 		if((unsigned int) n > sizeof(buffer)-1)
@@ -1102,25 +1202,32 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 			append(conn, res2.headers[i].value, res2.headers[i].value_len);
 			append(conn, "\r\n", 2);
 		}
-
 		append(conn, "\r\n", 2);
-
-		if(head_only == 0 && res->body != NULL && res->body_len > 0)
-			append(conn, res->body, res->body_len);
 	}
 
+	if(head_only == 1)
 	{
-		for(unsigned int i = 0; i < res2.headerc; i += 1)
-		free(res2.headers[i].name);
-
-		if(res2.headers != NULL)
-			free(res2.headers);
+		if(conn->sending_from_fd)
+		{
+			close(conn->file_fd);
+			conn->file_fd = -1;
+		}
 	}
-
+	else
+		if(!conn->sending_from_fd)
+			append(conn, res->body.str, 
+				         res->body.len);
+done:
 	conn->served += 1;
 
 	if(!keep_alive)
 		conn->close_when_uploaded = 1;
+
+	for(unsigned int i = 0; i < res2.headerc; i += 1)
+			free(res2.headers[i].name);
+
+	if(res2.headers != NULL)
+		free(res2.headers);
 }
 
 static uint32_t determine_content_length(xh_request *req)
@@ -1518,7 +1625,8 @@ const char *xhttp(const char *addr, unsigned short port,
 
 			int old_connum = context.connum;
 
-			if((events[i].events & (EPOLLIN | EPOLLPRI)) && conn->close_when_uploaded == 0)
+			if((events[i].events & (EPOLLIN | EPOLLPRI)) 
+				&& conn->close_when_uploaded == 0)
 			{
 				// Note that this may close the connection. If any logic
 			    // were to come after this function, it couldn't refer

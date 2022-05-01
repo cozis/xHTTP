@@ -45,8 +45,12 @@ typedef struct {
 	xh_header   *headers;
 	unsigned int headerc;
 
-	const char  *body;
-	unsigned int body_len;
+	struct {
+		const char *str;
+		long long   len;
+	} body;
+
+	const char *file;
 
 	_Bool close;
 } xh_response;

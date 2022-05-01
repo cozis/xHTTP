@@ -1,7 +1,7 @@
 
 // Build with:
 //   $ gcc example.c xhttp.c -o example
-
+#include <string.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -11,18 +11,18 @@ static xh_handle handle;
 
 static void callback(xh_request *req, xh_response *res)
 {
-	#define RESPONSE "Hello, world!"
-
+	(void) req;
 	res->status = 200;
-
-	res->body = RESPONSE;
-	res->body_len = sizeof(RESPONSE)-1;
-	
+	if(!strcmp(req->URL, "/file"))
+		res->file = "example.c";
+	else
+		res->body.str = "Hello, world!";
 	xh_header_add(res, "Content-Type", "text/plain");
 }
 
 static void handle_sigterm(int signum) 
 {
+	(void) signum;
 	xh_quit(handle);
 }
 
