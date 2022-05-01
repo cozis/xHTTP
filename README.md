@@ -8,6 +8,7 @@ xHTTP's more relevant features are:
 - It's fast
 - HTTP/1.1
 - Supports `Connection: Keep-Alive`
+- Uses `sendfile`
 - No global state
 - Single-threaded
 - Based on Linux's epoll

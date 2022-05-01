@@ -32,7 +32,7 @@ int main()
 	signal(SIGTERM, handle_sigterm);
 	signal(SIGQUIT, handle_sigterm);
 	signal(SIGINT,  handle_sigterm);
-
+	
 	const char *error = xhttp(NULL, 8080, callback, 
 		                      NULL, &handle, NULL);
 	if(error != NULL)
