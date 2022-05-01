@@ -43,36 +43,6 @@ Here's an example of a basic server which always responds with a "Hello, world!"
 #include <stdio.h>
 #include "xhttp.h"
 
-void callback(xh_request *req, xh_response *res)
-{
-    #define RESPONSE "Hello, world!"
-
-    res->status = 200;
-    res->body = RESPONSE;
-    res->body_len = sizeof(RESPONSE)-1;
-    xh_header_add(res, "Content-Type", "text/plain");
-}
-
-int main()
-{
-    const char    *addr = NULL;
-    unsigned short port = 8080;
-
-    const char *error = xhttp(addr, port, callback, NULL, NULL);
-
-    if(error != NULL)
-    {
-        fprintf(stderr, "ERROR: %s\n", error);
-        return 1;
-    }
-    return 0;
-}
-
-``` 
-```c
-#include <stdio.h>
-#include "xhttp.h"
-
 static void callback(xh_request *req, xh_response *res, void *userp)
 {
     (void) req;
@@ -96,6 +66,7 @@ int main()
 }
 
 ```
+
 if this were your `main.c` file, you'd compile it with
 ```sh
 $ gcc main.c xhttp.c -o main
