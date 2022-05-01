@@ -69,6 +69,33 @@ int main()
 }
 
 ``` 
+```c
+#include <stdio.h>
+#include "xhttp.h"
+
+static void callback(xh_request *req, xh_response *res, void *userp)
+{
+    (void) req;
+    (void) userp;
+    res->status = 200;
+    res->body.str = "Hello, world!";
+    xh_header_add(res, "Content-Type", "text/plain");
+}
+
+int main()
+{
+    const char *error = xhttp(NULL, 8080, callback, 
+                              NULL, NULL, NULL);
+    if(error != NULL)
+    {
+        fprintf(stderr, "ERROR: %s\n", error);
+        return 1;
+    }
+    fprintf(stderr, "OK\n");
+    return 0;
+}
+
+```
 if this were your `main.c` file, you'd compile it with
 ```sh
 $ gcc main.c xhttp.c -o main
