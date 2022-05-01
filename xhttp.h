@@ -61,9 +61,11 @@ typedef struct {
 	unsigned int backlog;
 } xh_config;
 
-typedef void (*xh_callback)(xh_request*, xh_response*);
+typedef void (*xh_callback)(xh_request*, xh_response*, void*);
 
-const char *xhttp(const char *addr, unsigned short port, xh_callback callback, xh_handle *handle, const xh_config *config);
+const char *xhttp(const char *addr, unsigned short port, 
+	              xh_callback callback, void *userp, 
+	              xh_handle *handle, const xh_config *config);
 void        xh_quit(xh_handle handle);
 xh_config   xh_get_default_configs();
 

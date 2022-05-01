@@ -148,6 +148,8 @@ typedef struct {
 	bool exiting;
 	int fd, epfd, maxconns, connum;
 	conn_t *pool, *freelist;
+	xh_callback callback;
+	void *userp;
 } context_t;
 
 static const char *statis_code_to_status_text(int code)
@@ -1057,7 +1059,7 @@ static void append(conn_t *conn, const char *str, int len)
 	return;
 }
 
-static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, xh_response*))
+static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *conn)
 {
 	xh_request *req = &conn->request.public;
 
@@ -1104,7 +1106,7 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	res2.type = XH_RES;
 	res->body.len = -1;
 
-	callback(req, res);
+	ctx->callback(req, res, ctx->userp);
 
 	if(req->headers != NULL)
 	{
@@ -1279,7 +1281,7 @@ static uint32_t determine_content_length(xh_request *req)
 	return result;
 }
 
-static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*callback)(xh_request*, xh_response*))
+static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 {
 	// Download the data in the input buffer.
 	uint32_t downloaded;
@@ -1431,7 +1433,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn, void (*c
 			char q = conn->in.data[conn->body_offset + conn->body_length];
 			conn->in.data[conn->body_offset + conn->body_length] = '\0';
 
-			generate_response_by_calling_the_callback(ctx, conn, callback);
+			generate_response_by_calling_the_callback(ctx, conn);
 
 			// Restore the byte after the body.
 			conn->in.data[conn->body_offset + conn->body_length] = q;
@@ -1573,8 +1575,8 @@ xh_config xh_get_default_configs()
 }
 
 const char *xhttp(const char *addr, unsigned short port, 
-				  xh_callback callback, xh_handle *handle, 
-				  const xh_config *config)
+				  xh_callback callback, void *userp,
+				  xh_handle *handle, const xh_config *config)
 {
 	xh_config dummy = xh_get_default_configs();
 	if(config == NULL)
@@ -1586,6 +1588,9 @@ const char *xhttp(const char *addr, unsigned short port,
 
 	if(error != NULL)
 		return error;
+
+	context.callback = callback;
+	context.userp = userp;
 
 	if(handle)
 		*handle = &context;
@@ -1631,7 +1636,7 @@ const char *xhttp(const char *addr, unsigned short port,
 				// Note that this may close the connection. If any logic
 			    // were to come after this function, it couldn't refer
 			    // to the connection structure.
-				when_data_is_ready_to_be_read(&context, conn, callback);
+				when_data_is_ready_to_be_read(&context, conn);
 			}
 
 			if(old_connum == context.connum)
