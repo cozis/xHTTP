@@ -70,11 +70,13 @@ typedef enum {
 } struct_type_t;
 
 typedef struct {
-	struct_type_t    type;
-	xh_response    public;
-	xh_header    *headers;
-	unsigned int  headerc;
-	unsigned int capacity;
+	struct_type_t type;
+	xh_response public;
+
+	xh_pair   *headers;
+	int    num_headers,
+	          capacity;
+	
 	bool failed;
 } xh_response2;
 
@@ -238,10 +240,10 @@ static const char *statis_code_to_status_text(int code)
  *   The index in the array of the matched header, or
  *   -1 is no header was found.
  */
-static int find_header(xh_header *headers, int count, const char *name)
+static int find_header(xh_pair *headers, int count, const char *name)
 {
 	for(int i = 0; i < count; i += 1)
-		if(xh_header_cmp(name, headers[i].name))
+		if(xh_header_cmp(name, headers[i].key.str))
 			return i;
 	return -1;
 }
@@ -275,7 +277,8 @@ void xh_header_add(xh_response *res, const char *name, const char *valfmt, ...)
 	if(res2->failed)
 		return;
 
-	int i = find_header(res2->headers, res2->headerc, name);
+	int i = find_header(res2->headers, 
+		      res2->num_headers, name);
 
 	unsigned int name_len, value_len;
 
@@ -326,11 +329,11 @@ void xh_header_add(xh_response *res, const char *name, const char *valfmt, ...)
 
 	if(i < 0)
 	{
-		if(res2->headerc == res2->capacity)
+		if(res2->num_headers == res2->capacity)
 			{
 				int new_capacity = res2->capacity == 0 ? 8 : res2->capacity * 2;
 
-				void *tmp = realloc(res2->headers, new_capacity * sizeof(xh_header));
+				void *tmp = realloc(res2->headers, new_capacity * sizeof(xh_pair));
 
 				if(tmp == NULL)
 				{
@@ -345,19 +348,20 @@ void xh_header_add(xh_response *res, const char *name, const char *valfmt, ...)
 				res2->capacity = new_capacity;
 			}
 
-		res2->headers[res2->headerc] = (xh_header) {
-			.name = name2, .value = value2,
-			.name_len = name_len, .value_len = value_len };
-
-		res2->headerc += 1;
-		res2->public.headerc = res2->headerc;
+		res2->headers[res2->num_headers] = (xh_pair) {
+			(xh_string) { name2, name_len },
+			(xh_string) { value2, value_len },
+		};
+		res2->num_headers += 1;
+		res2->public.num_headers = res2->num_headers;
 	}
 	else
 	{
-		free(res2->headers[i].name);
-		res2->headers[i] = (xh_header) {
-			.name = name2, .value = value2,
-			.name_len = name_len, .value_len = value_len };
+		free(res2->headers[i].key.str);
+		res2->headers[i] = (xh_pair) {
+			(xh_string) { name2, name_len },
+			(xh_string) { value2, value_len },
+		};
 	}
 }
 
@@ -387,20 +391,20 @@ void xh_header_rem(xh_response *res, const char *name)
 	if(res2->failed)
 		return;
 
-	int i = find_header(res2->headers, res2->headerc, name);
+	int i = find_header(res2->headers, res2->num_headers, name);
 
 	if(i < 0)
 		return;
 
-	free(res2->headers[i].name);
+	free(res2->headers[i].key.str);
 
 	assert(i >= 0);
 
-	for(; (unsigned int) i < res2->headerc-1; i += 1)
+	for(; i < res2->num_headers-1; i += 1)
 		res2->headers[i] = res2->headers[i+1];
 
-	res2->headerc -= 1;
-	res2->public.headerc -= 1;
+	res2->num_headers -= 1;
+	res2->public.num_headers -= 1;
 }
 
 /* Symbol: xh_header_get
@@ -431,8 +435,8 @@ void xh_header_rem(xh_response *res, const char *name)
  */
 const char *xh_header_get(void *req_or_res, const char *name)
 {
-	xh_header   *headers;
-	unsigned int headerc;
+	xh_pair *headers;
+	int  num_headers;
 
 	{
 		_Static_assert(offsetof(xh_response2, public) == offsetof(xh_request2, public), 
@@ -443,22 +447,22 @@ const char *xh_header_get(void *req_or_res, const char *name)
 		if(type == XH_REQ)
 		{
 			headers = ((xh_request*) req_or_res)->headers;
-			headerc = ((xh_request*) req_or_res)->headerc;
+			num_headers = ((xh_request*) req_or_res)->num_headers;
 		}
 		else
 		{
 			assert(type == XH_RES);
 			headers = ((xh_response*) req_or_res)->headers;
-			headerc = ((xh_response*) req_or_res)->headerc;
+			num_headers = ((xh_response*) req_or_res)->num_headers;
 		}
 	}
 
-	int i = find_header(headers, headerc, name);
+	int i = find_header(headers, num_headers, name);
 
 	if(i < 0)
 		return NULL;
 
-	return headers[i].value;
+	return headers[i].val.str;
 }
 
 /* Symbol: xh_header_cmp
@@ -697,8 +701,9 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 	i += 1; // Skip the \n.
 
-	int capacity = 0, headerc = 0;
-	xh_header *headers = NULL;
+	int     capacity = 0, 
+	     num_headers = 0;
+	xh_pair *headers = NULL;
 
 	while(1)
 	{
@@ -769,11 +774,11 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 		uint32_t hvalue_length = (i - 2) - hvalue_offset;
 
-		if(headerc == capacity)
+		if(num_headers == capacity)
 		{
 			int new_capacity = capacity == 0 ? 8 : capacity * 2;
 
-			void *temp = realloc(headers, new_capacity * sizeof(xh_header));
+			void *temp = realloc(headers, new_capacity * sizeof(xh_pair));
 
 			if(temp == NULL)
 			{
@@ -785,11 +790,9 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 			headers = temp;
 		}
 
-		headers[headerc++] = (xh_header) {
-			.name      = str + hname_offset,
-			.name_len  =       hname_length,
-			.value     = str + hvalue_offset,
-			.value_len =       hvalue_length,
+		headers[num_headers++] = (xh_pair) {
+			{ str +  hname_offset,  hname_length },
+			{ str + hvalue_offset, hvalue_length },
 		};
 
 		str[ hname_offset +  hname_length] = '\0';
@@ -797,10 +800,12 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 	}
 
 	req->headers = headers;
-	req->headerc = headerc;
+	req->num_headers = num_headers;
 
-	req->method  = str +  method_offset;
-	req->URL     = str +     URL_offset;
+	req->method.str = str + method_offset;
+	req->method.len =       method_length;
+	req->URL.str    = str +    URL_offset;
+	req->URL.len    =          URL_length;
 
 	str[ method_offset +  method_length] = '\0';
 	str[    URL_offset +     URL_length] = '\0';
@@ -811,17 +816,17 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 		bool unknown_method = 0;
 
 		#define PAIR(p, q) (uint64_t) (((uint64_t) p << 32) | (uint64_t) q)
-		switch(PAIR(req->method[0], method_length))
+		switch(PAIR(req->method.str[0], method_length))
 		{
-			case PAIR('G', 3): req->method_id = XH_GET;     unknown_method = !!strcmp(req->method, "GET"); 	break;
-			case PAIR('H', 4): req->method_id = XH_HEAD;    unknown_method = !!strcmp(req->method, "HEAD"); break;
-			case PAIR('P', 4): req->method_id = XH_POST;    unknown_method = !!strcmp(req->method, "POST"); break;
-			case PAIR('P', 3): req->method_id = XH_PUT;     unknown_method = !!strcmp(req->method, "PUT"); 	break;
-			case PAIR('D', 6): req->method_id = XH_DELETE;  unknown_method = !!strcmp(req->method, "DELETE");  break;
-			case PAIR('C', 7): req->method_id = XH_CONNECT; unknown_method = !!strcmp(req->method, "CONNECT"); break;
-			case PAIR('O', 7): req->method_id = XH_OPTIONS; unknown_method = !!strcmp(req->method, "OPTIONS"); break;
-			case PAIR('T', 5): req->method_id = XH_TRACE;   unknown_method = !!strcmp(req->method, "TRACE"); break;
-			case PAIR('P', 5): req->method_id = XH_PATCH;   unknown_method = !!strcmp(req->method, "PATCH"); break;
+			case PAIR('G', 3): req->method_id = XH_GET;     unknown_method = !!strcmp(req->method.str, "GET"); 	break;
+			case PAIR('H', 4): req->method_id = XH_HEAD;    unknown_method = !!strcmp(req->method.str, "HEAD"); break;
+			case PAIR('P', 4): req->method_id = XH_POST;    unknown_method = !!strcmp(req->method.str, "POST"); break;
+			case PAIR('P', 3): req->method_id = XH_PUT;     unknown_method = !!strcmp(req->method.str, "PUT"); 	break;
+			case PAIR('D', 6): req->method_id = XH_DELETE;  unknown_method = !!strcmp(req->method.str, "DELETE");  break;
+			case PAIR('C', 7): req->method_id = XH_CONNECT; unknown_method = !!strcmp(req->method.str, "CONNECT"); break;
+			case PAIR('O', 7): req->method_id = XH_OPTIONS; unknown_method = !!strcmp(req->method.str, "OPTIONS"); break;
+			case PAIR('T', 5): req->method_id = XH_TRACE;   unknown_method = !!strcmp(req->method.str, "TRACE"); break;
+			case PAIR('P', 5): req->method_id = XH_PATCH;   unknown_method = !!strcmp(req->method.str, "PATCH"); break;
 			default: unknown_method = 1; break;
 		}
 		#undef PAIR
@@ -1096,8 +1101,8 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	if(head_only)
 	{
 		req->method_id = XH_GET;
-		req->method = "GET";
-		req->method_len = sizeof("GET")-1;
+		req->method.str = "GET";
+		req->method.len = sizeof("GET")-1;
 	}
 
 	xh_response2 res2;
@@ -1197,11 +1202,11 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 
 		append(conn, buffer, n);
 
-		for(unsigned int i = 0; i < res2.headerc; i += 1)
+		for(int i = 0; i < res2.num_headers; i += 1)
 		{
-			append(conn, res2.headers[i].name, res2.headers[i].name_len);
+			append(conn, res2.headers[i].key.str, res2.headers[i].key.len);
 			append(conn, ": ", 2);
-			append(conn, res2.headers[i].value, res2.headers[i].value_len);
+			append(conn, res2.headers[i].val.str, res2.headers[i].val.len);
 			append(conn, "\r\n", 2);
 		}
 		append(conn, "\r\n", 2);
@@ -1225,8 +1230,8 @@ done:
 	if(!keep_alive)
 		conn->close_when_uploaded = 1;
 
-	for(unsigned int i = 0; i < res2.headerc; i += 1)
-			free(res2.headers[i].name);
+	for(int i = 0; i < res2.num_headers; i += 1)
+			free(res2.headers[i].key.str);
 
 	if(res2.headers != NULL)
 		free(res2.headers);
@@ -1234,17 +1239,18 @@ done:
 
 static uint32_t determine_content_length(xh_request *req)
 {
-	unsigned int i;
-	for(i = 0; i < req->headerc; i += 1)
-		if(!strcmp(req->headers[i].name, "Content-Length")) // TODO: Make it case-insensitive.
+	int i;
+	for(i = 0; i < req->num_headers; i += 1)
+		if(!strcmp(req->headers[i].key.str, 
+		           "Content-Length")) // TODO: Make it case-insensitive.
 			break;
 
-	if(i == req->headerc)
+	if(i == req->num_headers)
 		// No Content-Length header.
 		// Assume a length of 0.
 		return 0;
 
-	const char *s = req->headers[i].value;
+	const char *s = req->headers[i].val.str;
 	unsigned int k = 0;
 
 	while(is_space(s[k]))
@@ -1426,8 +1432,8 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 			// The rest of the body arrived.
 			xh_request *req = &conn->request.public;
 
-			req->body = conn->in.data + conn->body_offset;
-			req->body_len = conn->body_length;
+			req->body.str = conn->in.data + conn->body_offset;
+			req->body.len = conn->body_length;
 
 			// Make the body temporarily zero-terminated.
 			char q = conn->in.data[conn->body_offset + conn->body_length];

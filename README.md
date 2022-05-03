@@ -33,7 +33,7 @@ by providing it with a callback that generates the HTTP response that the librar
 
 The callback's interface must be
 ```c
-void callback(xh_request *req, xh_response *res);
+void callback(xh_request *req, xh_response *res, void *userp);
 ```
 The request information is provided through the `req` argument, while `res` is an output argument. The callback will respond to the request by setting the fields of `res`. These two arguments are never `NULL`.
 

@@ -3,6 +3,14 @@
 
 typedef void *xh_handle;
 
+typedef struct {
+	char *str; int len;
+} xh_string;
+
+typedef struct {
+	xh_string key, val;
+} xh_pair;
+
 typedef enum {
 	XH_GET     = 1 << 0, 
 	XH_HEAD    = 1 << 1,
@@ -16,40 +24,27 @@ typedef enum {
 } xh_method;
 
 typedef struct {
-	char *name, *value;
-	unsigned int name_len;
-	unsigned int value_len;
-} xh_header;
-
-typedef struct {
-	xh_method    method_id;
-	const char  *method;
-	unsigned int method_len;
-
-	const char  *URL;
-	unsigned int URL_len;
+	xh_method method_id;
+	xh_string method;
+	xh_string URL;
 
 	unsigned int version_minor;
 	unsigned int version_major;
 
-	xh_header   *headers;
-	unsigned int headerc;
+	xh_pair *headers;
+	int  num_headers;
 
-	const char  *body;
-	unsigned int body_len;
+	xh_string body;
 } xh_request;
 
 typedef struct {
+
 	int status;
 
-	xh_header   *headers;
-	unsigned int headerc;
+	xh_pair *headers;
+	int  num_headers;
 
-	struct {
-		const char *str;
-		long long   len;
-	} body;
-
+	xh_string   body;
 	const char *file;
 
 	_Bool close;
