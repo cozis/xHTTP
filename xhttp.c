@@ -72,11 +72,8 @@ typedef enum {
 typedef struct {
 	struct_type_t type;
 	xh_response public;
-
-	xh_pair   *headers;
-	int    num_headers,
-	          capacity;
-	
+	xh_table   headers;
+	int capacity;
 	bool failed;
 } xh_response2;
 
@@ -226,24 +223,21 @@ static const char *statis_code_to_status_text(int code)
  *
  * Arguments:
  *
- *   - headers: The header array.
+ *   - headers: The header set array.
  *
- *   - count: The length of the header array.
- *            It can't be negative.
- *
- *   - name: Zero-terminated string that contains
- *           the header's name. The comparison with
- *           each header's name is made using [xh_hcmp],
+ *   - name: Zero-terminated string that contains the 
+ *           header's name. The comparison with each 
+ *           header's name is made using [xh_header_cmp],
  *           so it's not case-sensitive.
  *
  * Returns:
  *   The index in the array of the matched header, or
  *   -1 is no header was found.
  */
-static int find_header(xh_pair *headers, int count, const char *name)
+static int find_header(xh_table headers, const char *name)
 {
-	for(int i = 0; i < count; i += 1)
-		if(xh_header_cmp(name, headers[i].key.str))
+	for(int i = 0; i < headers.count; i += 1)
+		if(xh_header_cmp(name, headers.list[i].key.str))
 			return i;
 	return -1;
 }
@@ -277,8 +271,7 @@ void xh_header_add(xh_response *res, const char *name, const char *valfmt, ...)
 	if(res2->failed)
 		return;
 
-	int i = find_header(res2->headers, 
-		      res2->num_headers, name);
+	int i = find_header(res2->headers, name);
 
 	unsigned int name_len, value_len;
 
@@ -329,11 +322,13 @@ void xh_header_add(xh_response *res, const char *name, const char *valfmt, ...)
 
 	if(i < 0)
 	{
-		if(res2->num_headers == res2->capacity)
+		if(res2->headers.count == res2->capacity)
 			{
-				int new_capacity = res2->capacity == 0 ? 8 : res2->capacity * 2;
+				int new_capacity = res2->capacity == 0 
+				                 ? 8 : res2->capacity * 2;
 
-				void *tmp = realloc(res2->headers, new_capacity * sizeof(xh_pair));
+				void *tmp = realloc(res2->headers.list, 
+					            new_capacity * sizeof(xh_pair));
 
 				if(tmp == NULL)
 				{
@@ -343,24 +338,21 @@ void xh_header_add(xh_response *res, const char *name, const char *valfmt, ...)
 					return;
 				}
 
-				res2->public.headers = tmp;
-				res2->headers = tmp;
+				res2->headers.list = tmp;
 				res2->capacity = new_capacity;
 			}
 
-		res2->headers[res2->num_headers] = (xh_pair) {
-			(xh_string) { name2, name_len },
-			(xh_string) { value2, value_len },
+		res2->headers.list[res2->headers.count] = (xh_pair) {
+			{ name2, name_len }, { value2, value_len },
 		};
-		res2->num_headers += 1;
-		res2->public.num_headers = res2->num_headers;
+		res2->headers.count += 1;
+		res2->public.headers = res2->headers;
 	}
 	else
 	{
-		free(res2->headers[i].key.str);
-		res2->headers[i] = (xh_pair) {
-			(xh_string) { name2, name_len },
-			(xh_string) { value2, value_len },
+		free(res2->headers.list[i].key.str);
+		res2->headers.list[i] = (xh_pair) {
+			{ name2, name_len }, { value2, value_len },
 		};
 	}
 }
@@ -391,20 +383,20 @@ void xh_header_rem(xh_response *res, const char *name)
 	if(res2->failed)
 		return;
 
-	int i = find_header(res2->headers, res2->num_headers, name);
+	int i = find_header(res2->headers, name);
 
 	if(i < 0)
 		return;
 
-	free(res2->headers[i].key.str);
+	free(res2->headers.list[i].key.str);
 
 	assert(i >= 0);
 
-	for(; i < res2->num_headers-1; i += 1)
-		res2->headers[i] = res2->headers[i+1];
+	for(; i < res2->headers.count-1; i += 1)
+		res2->headers.list[i] = res2->headers.list[i+1];
 
-	res2->num_headers -= 1;
-	res2->public.num_headers -= 1;
+	res2->headers.count -= 1;
+	res2->public.headers = res2->headers;
 }
 
 /* Symbol: xh_header_get
@@ -435,8 +427,7 @@ void xh_header_rem(xh_response *res, const char *name)
  */
 const char *xh_header_get(void *req_or_res, const char *name)
 {
-	xh_pair *headers;
-	int  num_headers;
+	xh_table headers;
 
 	{
 		_Static_assert(offsetof(xh_response2, public) == offsetof(xh_request2, public), 
@@ -445,24 +436,20 @@ const char *xh_header_get(void *req_or_res, const char *name)
 		struct_type_t type = ((xh_request2*) ((char*) req_or_res - offsetof(xh_request2, public)))->type;
 
 		if(type == XH_REQ)
-		{
 			headers = ((xh_request*) req_or_res)->headers;
-			num_headers = ((xh_request*) req_or_res)->num_headers;
-		}
 		else
 		{
 			assert(type == XH_RES);
 			headers = ((xh_response*) req_or_res)->headers;
-			num_headers = ((xh_response*) req_or_res)->num_headers;
 		}
 	}
 
-	int i = find_header(headers, num_headers, name);
+	int i = find_header(headers, name);
 
 	if(i < 0)
 		return NULL;
 
-	return headers[i].val.str;
+	return headers.list[i].val.str;
 }
 
 /* Symbol: xh_header_cmp
@@ -566,8 +553,8 @@ static void close_connection(context_t *ctx, conn_t *conn)
 		conn->out.data = NULL;
 	}
 
-	if(conn->request.public.headers != NULL)
-		free(conn->request.public.headers);
+	if(conn->request.public.headers.list != NULL)
+		free(conn->request.public.headers.list);
 
 	conn->fd = -1;
 
@@ -661,7 +648,21 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 	uint32_t URL_offset = i;
 
-	skip_until(str, len, &i, ' ');
+	while(i < len && str[i] != ' ' 
+		          && str[i] != '?')
+		i += 1;
+
+	if(i < len && str[i] == '?')
+	{
+		uint32_t param_off = i;
+
+		while(i < len && str[i] != ' ')
+			i += 1;
+
+		uint32_t param_len = i - param_off;
+
+		/* ..Do something with the parameters.. */
+	}
 
 	uint32_t URL_length = i - URL_offset;
 
@@ -701,15 +702,15 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 	i += 1; // Skip the \n.
 
-	int     capacity = 0, 
-	     num_headers = 0;
-	xh_pair *headers = NULL;
+	int capacity = 0;
+	xh_table headers = { 
+		.list = NULL, .count = 0 };
 
 	while(1)
 	{
 		if(i == len)
 		{
-			if(headers != NULL) free(headers);
+			free(headers.list);
 			return FAILURE("Missing blank line");
 		}
 
@@ -728,13 +729,13 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 		if(i == len)
 		{
-			if(headers != NULL) free(headers);
+			free(headers.list);
 			return FAILURE("Malformed header");
 		}
 
 		if(hname_length == 0)
 		{
-			if(headers != NULL) free(headers);
+			free(headers.list);
 			return FAILURE("Empty header name");
 		}
 
@@ -754,7 +755,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 			if(i == len)
 			{
-				if(headers != NULL) free(headers);
+				free(headers.list);
 				return FAILURE("Malformed header");
 			}
 
@@ -764,7 +765,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 			if(i == len)
 			{
-				if(headers != NULL) free(headers);
+				free(headers.list);
 				return FAILURE("Malformed header");
 			}
 		}
@@ -774,23 +775,24 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 		uint32_t hvalue_length = (i - 2) - hvalue_offset;
 
-		if(num_headers == capacity)
+		if(headers.count == capacity)
 		{
 			int new_capacity = capacity == 0 ? 8 : capacity * 2;
 
-			void *temp = realloc(headers, new_capacity * sizeof(xh_pair));
+			void *temp = realloc(headers.list, 
+				new_capacity * sizeof(xh_pair));
 
 			if(temp == NULL)
 			{
-				if(headers != NULL) free(headers);
+				free(headers.list);
 				return INTERNAL_FAILURE("No memory");
 			}
 
 			capacity = new_capacity;
-			headers = temp;
+			headers.list = temp;
 		}
 
-		headers[num_headers++] = (xh_pair) {
+		headers.list[headers.count++] = (xh_pair) {
 			{ str +  hname_offset,  hname_length },
 			{ str + hvalue_offset, hvalue_length },
 		};
@@ -800,7 +802,6 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 	}
 
 	req->headers = headers;
-	req->num_headers = num_headers;
 
 	req->method.str = str + method_offset;
 	req->method.len =       method_length;
@@ -833,7 +834,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 		if(unknown_method)
 		{
-			if(headers != NULL) free(headers);
+			free(headers.list);
 			return FAILURE("Unknown method");
 		}
 	}
@@ -916,7 +917,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 		if(bad_version)
 		{
-			if(headers != NULL) free(headers);
+			free(headers.list);
 			return FAILURE("Bad HTTP version");
 		}
 	}
@@ -1113,10 +1114,11 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 
 	ctx->callback(req, res, ctx->userp);
 
-	if(req->headers != NULL)
+	if(req->headers.list != NULL)
 	{
-		free(req->headers);
-		req->headers = NULL;
+		free(req->headers.list);
+		req->headers.list = NULL;
+		req->headers.count = 0;
 	}
 
 	if(res->close)
@@ -1202,11 +1204,11 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 
 		append(conn, buffer, n);
 
-		for(int i = 0; i < res2.num_headers; i += 1)
+		for(int i = 0; i < res2.headers.count; i += 1)
 		{
-			append(conn, res2.headers[i].key.str, res2.headers[i].key.len);
+			append(conn, res2.headers.list[i].key.str, res2.headers.list[i].key.len);
 			append(conn, ": ", 2);
-			append(conn, res2.headers[i].val.str, res2.headers[i].val.len);
+			append(conn, res2.headers.list[i].val.str, res2.headers.list[i].val.len);
 			append(conn, "\r\n", 2);
 		}
 		append(conn, "\r\n", 2);
@@ -1230,27 +1232,27 @@ done:
 	if(!keep_alive)
 		conn->close_when_uploaded = 1;
 
-	for(int i = 0; i < res2.num_headers; i += 1)
-			free(res2.headers[i].key.str);
+	for(int i = 0; i < res2.headers.count; i += 1)
+			free(res2.headers.list[i].key.str);
 
-	if(res2.headers != NULL)
-		free(res2.headers);
+	if(res2.headers.list != NULL)
+		free(res2.headers.list);
 }
 
 static uint32_t determine_content_length(xh_request *req)
 {
 	int i;
-	for(i = 0; i < req->num_headers; i += 1)
-		if(!strcmp(req->headers[i].key.str, 
+	for(i = 0; i < req->headers.count; i += 1)
+		if(!strcmp(req->headers.list[i].key.str, 
 		           "Content-Length")) // TODO: Make it case-insensitive.
 			break;
 
-	if(i == req->num_headers)
+	if(i == req->headers.count)
 		// No Content-Length header.
 		// Assume a length of 0.
 		return 0;
 
-	const char *s = req->headers[i].val.str;
+	const char *s = req->headers.list[i].val.str;
 	unsigned int k = 0;
 
 	while(is_space(s[k]))

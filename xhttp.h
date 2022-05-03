@@ -11,6 +11,11 @@ typedef struct {
 	xh_string key, val;
 } xh_pair;
 
+typedef struct {
+	xh_pair *list;
+	int     count;
+} xh_table;
+
 typedef enum {
 	XH_GET     = 1 << 0, 
 	XH_HEAD    = 1 << 1,
@@ -27,25 +32,22 @@ typedef struct {
 	xh_method method_id;
 	xh_string method;
 	xh_string URL;
-
 	unsigned int version_minor;
 	unsigned int version_major;
-
-	xh_pair *headers;
-	int  num_headers;
-
+	xh_table headers;
 	xh_string body;
 } xh_request;
 
 typedef struct {
 
 	int status;
-
-	xh_pair *headers;
-	int  num_headers;
-
+	xh_table headers;
 	xh_string   body;
 	const char *file;
+
+#ifdef XH_PARSE_URI_PARAMS
+	xh_table params;
+#endif
 
 	_Bool close;
 } xh_response;
