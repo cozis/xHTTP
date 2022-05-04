@@ -31,6 +31,7 @@ typedef enum {
 typedef struct {
 	xh_method method_id;
 	xh_string method;
+	xh_string params;
 	xh_string URL;
 	unsigned int version_minor;
 	unsigned int version_major;
@@ -44,10 +45,6 @@ typedef struct {
 	xh_table headers;
 	xh_string   body;
 	const char *file;
-
-#ifdef XH_PARSE_URI_PARAMS
-	xh_table params;
-#endif
 
 	_Bool close;
 } xh_response;
@@ -70,5 +67,11 @@ void        xh_header_add(xh_response *res, const char *name, const char *valfmt
 void        xh_header_rem(xh_response *res, const char *name);
 const char *xh_header_get(void *req_or_res, const char *name);
 _Bool       xh_header_cmp(const char *a, const char *b);
+
+#define xh_string_new(s, l) \
+	((xh_string) { (s), ((int) (l)) < 0 ? (int) strlen(s) : (int) (l) })
+
+#define xh_string_from_literal(s) \
+	((xh_string) { (s), sizeof(s)-1 })
 
 #endif // #ifndef XHTTP_H

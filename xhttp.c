@@ -684,26 +684,19 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 		return FAILURE("Missing URL and HTTP version");
 
 	uint32_t URL_offset = i;
-
-	while(i < len && str[i] != ' ' 
-		          && str[i] != '?')
+	while(i < len && str[i] != ' ' && str[i] != '?')
 		i += 1;
-
+	uint32_t URL_length = i - URL_offset;
+	
+	uint32_t params_offset;
 	if(i < len && str[i] == '?')
 	{
-		uint32_t param_off = i;
-
+		params_offset = i+1;
 		while(i < len && str[i] != ' ')
 			i += 1;
-
-		uint32_t param_len = i - param_off;
-
-		/* ..Do something with the parameters.. */
 	}
-
-	uint32_t URL_length = i - URL_offset;
-
-	assert(URL_length > 0);
+	else params_offset = i;
+	uint32_t params_length = i - params_offset;
 
 	if(i == len)
 		return FAILURE("Missing HTTP version");
@@ -840,13 +833,13 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 
 	req->headers = headers;
 
-	req->method.str = str + method_offset;
-	req->method.len =       method_length;
-	req->URL.str    = str +    URL_offset;
-	req->URL.len    =          URL_length;
+	req->method = xh_string_new(str + method_offset, method_length);
+	req->URL    = xh_string_new(str +    URL_offset,    URL_length);
+	req->params = xh_string_new(str + params_offset, params_length);
 
 	str[ method_offset +  method_length] = '\0';
 	str[    URL_offset +     URL_length] = '\0';
+	str[ params_offset +  params_length] = '\0';
 	str[version_offset + version_length] = '\0';
 
 	// Validate the header.
@@ -1064,9 +1057,6 @@ static uint32_t find(const char *str, uint32_t len, const char *seq)
 		i += 1;
 	}
 }
-
-#define xh_string_new(s, l) ((xh_string) { (s), ((int) (l)) < 0 ? (int) strlen(s) : (int) (l) })
-#define xh_string_from_literal(s) ((xh_string) { (s), sizeof(s)-1 })
 
 static void append_string_to_output_buffer(conn_t *conn, xh_string data)
 {

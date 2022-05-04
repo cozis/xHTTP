@@ -13,6 +13,7 @@ static void callback(xh_request *req, xh_response *res, void *userp)
 {
 	(void) req;
 	(void) userp;
+	
 	res->status = 200;
 	if(!strcmp(req->URL.str, "/file"))
 		res->file = "example.c";
