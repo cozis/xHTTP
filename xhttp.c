@@ -498,6 +498,12 @@ static void res_deinit(xh_response2 *res)
 	}
 }
 
+static void res_reinit(xh_response2 *res)
+{
+	res_deinit(res);
+	res_init(res);
+}
+
 static void req_init(xh_request2 *req)
 {
 	req->type = XH_REQ;
@@ -1130,14 +1136,6 @@ static bool server_wants_to_keep_alive(context_t *ctx, conn_t *conn)
 	return keep_alive;
 }
 
-static void append_header_to_output_buffer(conn_t *conn, xh_pair header)
-{
-	append_string_to_output_buffer(conn, header.key);
-	append_string_to_output_buffer(conn, xh_string_from_literal(": "));
-	append_string_to_output_buffer(conn, header.val);
-	append_string_to_output_buffer(conn, xh_string_from_literal("\r\n"));
-}
-
 static void append_response_status_line_to_output_buffer(conn_t *conn, int status)
 {
 	char buffer[256];
@@ -1159,7 +1157,13 @@ static void append_response_head_to_output_buffer(xh_response *res, conn_t *conn
 {
 	append_response_status_line_to_output_buffer(conn, res->status);
 	for(int i = 0; i < res->headers.count; i += 1)
-		append_header_to_output_buffer(conn, res->headers.list[i]);
+	{
+		xh_pair header = res->headers.list[i];
+		append_string_to_output_buffer(conn, header.key);
+		append_string_to_output_buffer(conn, xh_string_from_literal(": "));
+		append_string_to_output_buffer(conn, header.val);
+		append_string_to_output_buffer(conn, xh_string_from_literal("\r\n"));
+	}
 	append_string_to_output_buffer(conn, xh_string_from_literal("\r\n"));
 }
 
@@ -1220,15 +1224,10 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 			/* Callback failed to build the response. 
 	         * Overwrite with a new error response.
 			 */
-			res_deinit(&res2);
+			res_reinit(&res2);
 			res->status = 500;
 		}
 	}
-
-	bool callback_wants_to_keep_alive = !res->close;
-	bool keep_alive = client_wants_to_keep_alive(req) 
-	               && server_wants_to_keep_alive(ctx, conn)
-	               && callback_wants_to_keep_alive;
 
 	/* Determine Content-Length and, if the *
 	 * response body  was specified with a  *
@@ -1236,6 +1235,8 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 
 	int content_length = -1, // Initialized these to shut up 
 	           file_fd = -1; // the compiler :S
+
+	bool sending_file;
 
 	if(res->file == NULL)
 	{
@@ -1248,6 +1249,7 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 			res->body.len = strlen(res->body.str);
 		
 		content_length = res->body.len;
+		sending_file = 0;
 	}
 	else
 	{
@@ -1257,19 +1259,30 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 		switch(open_regular_file(res->file, 
 			&content_length, &file_fd))
 		{
-			case ORF_FORBIDDEN: 
-#warning "TODO"
+			case ORF_FORBIDDEN:
+			res_reinit(&res2);
+			res->status = 403;
+			content_length = 0;
+			sending_file = 0;
 			break;
 			
 			case ORF_NOTFOUND:
-#warning "TODO"
+			res_reinit(&res2);
+			res->status = 404;
+			content_length = 0;
+			sending_file = 0;
 			break;
 
-			case ORF_OTHER: 
-#warning "TODO"
+			case ORF_OTHER:
+			res_reinit(&res2);
+			res->status = 500;
+			content_length = 0;
+			sending_file = 0;
 			break;
 
 			case ORF_OK:
+			assert(fd >= 0 && content_length >= 0);
+			sending_file = 1;
 			break;
 
 			/* Don't add a [default] case to make
@@ -1277,7 +1290,12 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 		}
 	}
 
-	assert(content_length >= 0 && fd >= 0);
+	assert(content_length >= 0);
+
+	bool callback_wants_to_keep_alive = !res->close;
+	bool keep_alive = client_wants_to_keep_alive(req) 
+	               && server_wants_to_keep_alive(ctx, conn)
+	               && callback_wants_to_keep_alive;
 
 	xh_header_add(res, "Content-Length", "%d", content_length);
 	xh_header_add(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
@@ -1289,20 +1307,19 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 
 	if(head_only == 1)
 	{
-		if(conn->sending_from_fd)
+		if(sending_file)
 			close(file_fd);
 	}
 	else 
 	{
-		if(res->file == NULL)
-			append_string_to_output_buffer(conn, res->body);
-		else
+		if(sending_file)
 		{
 			conn->file_fd = file_fd;
 			conn->file_off = 0;
 			conn->file_len = content_length;
 			conn->sending_from_fd = 1;
 		}
+		else append_string_to_output_buffer(conn, res->body);
 	}
 
 	conn->served += 1;
