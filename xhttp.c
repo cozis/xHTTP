@@ -117,25 +117,25 @@ struct conn_t {
 	// connection is closed.
 	bool close_when_uploaded;
 
-	// The way writes to the output buffer
-	// occur is through the [append] function. 
-	// Since the output buffer may beed to 
-	// be resized, the [append] operation 
-	// may fail. Since checking every time 
-	// for the return value makes the code 
-	// very verbose, instead of returning 
-	// an error value, this flag is set. If 
-	// this flag is set then [append] operations 
-	// have no effect and when [upload] is 
-	// called it returns the error that the 
-	// first [append] that failed would have
-	// returned.
+	// The way writes to the output buffer occur is
+	//  through the [append_string_to_output_buffer] 
+	// function. Since the output buffer may beed to 
+	// be resized, the [append_string_to_output_buffer] 
+	// operation may fail. Since checking every time 
+	// for the return value makes the code very verbose, 
+	// instead of returning an error value, this flag 
+	// is set. If this flag is set then 
+	// [append_string_to_output_buffer] operations 
+	// have no effect and when [upload] is called it 
+	// returns the error that the  first 
+	// [append_string_to_output_buffer] that failed 
+	// would have returned.
 	bool failed_to_append;
 
 	bool sending_from_fd;
 	int  file_fd;
-	long file_len;
-	long file_off;
+	int  file_off;
+	int  file_len;
 
 	bool   head_received;
 	uint32_t body_offset;
@@ -399,6 +399,22 @@ void xh_header_rem(xh_response *res, const char *name)
 	res2->public.headers = res2->headers;
 }
 
+static xh_table get_headers_from_req_or_res(void *req_or_res)
+{
+	_Static_assert(offsetof(xh_response2, public) == offsetof(xh_request2, public), 
+					   "The public portion of xh_response2 and xh_request2 must be aligned the same way");
+
+	struct_type_t type = ((xh_request2*) ((char*) req_or_res 
+		             - offsetof(xh_request2, public)))->type;
+
+	assert(type == XH_RES || type == XH_REQ);
+
+	xh_table headers = (type == XH_REQ)?
+			((xh_request *) req_or_res)->headers:
+			((xh_response*) req_or_res)->headers;
+	return headers;
+}
+
 /* Symbol: xh_header_get
  *
  *   Find the contents of a header given it's
@@ -427,22 +443,7 @@ void xh_header_rem(xh_response *res, const char *name)
  */
 const char *xh_header_get(void *req_or_res, const char *name)
 {
-	xh_table headers;
-
-	{
-		_Static_assert(offsetof(xh_response2, public) == offsetof(xh_request2, public), 
-					   "The public portion of xh_response2 and xh_request2 must be aligned the same way");
-
-		struct_type_t type = ((xh_request2*) ((char*) req_or_res - offsetof(xh_request2, public)))->type;
-
-		if(type == XH_REQ)
-			headers = ((xh_request*) req_or_res)->headers;
-		else
-		{
-			assert(type == XH_RES);
-			headers = ((xh_response*) req_or_res)->headers;
-		}
-	}
+	xh_table headers = get_headers_from_req_or_res(req_or_res);
 
 	int i = find_header(headers, name);
 
@@ -477,6 +478,36 @@ bool xh_header_cmp(const char *a, const char *b)
 		a += 1, b += 1;
 
 	return tolower(*a) == tolower(*b);
+}
+
+static void res_init(xh_response2 *res)
+{
+	memset(res, 0, sizeof(xh_response2));
+	res->type = XH_RES;
+	res->public.body.len = -1;
+}
+
+static void res_deinit(xh_response2 *res)
+{
+	if(res->headers.list != NULL)
+	{
+		assert(res->headers.count > 0);
+		for(int i = 0; i < res->headers.count; i += 1)
+			free(res->headers.list[i].key.str);
+		free(res->headers.list);
+	}
+}
+
+static void req_init(xh_request2 *req)
+{
+	req->type = XH_REQ;
+}
+
+static void req_deinit(xh_request *req)
+{
+	free(req->headers.list);
+	req->headers.list = NULL;
+	req->headers.count = 0;
 }
 
 static bool set_non_blocking(int fd)
@@ -517,7 +548,7 @@ static void accept_connection(context_t *ctx)
 
 	memset(conn, 0, sizeof(conn_t));
 	conn->fd = cfd;
-	conn->request.type = XH_REQ;
+	req_init(&conn->request);
 
 	struct epoll_event buffer;
 	buffer.events = EPOLLET  | EPOLLIN
@@ -1028,25 +1059,20 @@ static uint32_t find(const char *str, uint32_t len, const char *seq)
 	}
 }
 
-static void append(conn_t *conn, const char *str, int len)
+#define xh_string_new(s, l) ((xh_string) { (s), (l) < 0 ? (int) strlen(s) : (l) })
+#define xh_string_from_literal(s) ((xh_string) { (s), sizeof(s)-1 })
+
+static void append_string_to_output_buffer(conn_t *conn, xh_string data)
 {
 	if(conn->failed_to_append)
 		return;
 
-	if(str == NULL || len == 0)
-		return;
-
-	if(len < 0)
-		len = strlen(str);
-
-	assert(len > 0);
-
-	if(conn->out.size - conn->out.used < (uint32_t) len)
+	if(conn->out.size - conn->out.used < (uint32_t) data.len)
 	{
 		uint32_t new_size = 2 * conn->out.size;
 
-		if(new_size < conn->out.used + (uint32_t) len)
-			new_size = conn->out.used + len;
+		if(new_size < conn->out.used + (uint32_t) data.len)
+			new_size = conn->out.used + data.len;
 
 		void *temp = realloc(conn->out.data, new_size);
 
@@ -1060,86 +1086,136 @@ static void append(conn_t *conn, const char *str, int len)
 		conn->out.size = new_size;
 	}
 
-	memcpy(conn->out.data + conn->out.used, str, len);
-	conn->out.used += len;
+	memcpy(conn->out.data + conn->out.used, data.str, data.len);
+	conn->out.used += data.len;
 	return;
+}
+
+static bool client_wants_to_keep_alive(xh_request *req)
+{
+	bool keep_alive;
+
+	const char *h_connection = xh_header_get(req, "Connection");
+
+	if(h_connection == NULL)
+		// No [Connection] header. No keep-alive.
+		keep_alive = 0;
+	else
+	{
+		// TODO: Make string comparisons case and whitespace insensitive.
+		if(!strcmp(h_connection, " Keep-Alive"))
+			keep_alive = 1;
+		else if(!strcmp(h_connection, " Close"))
+			keep_alive = 0;
+		else
+			keep_alive = 0;
+	}
+
+	return keep_alive;
+}
+
+static bool server_wants_to_keep_alive(context_t *ctx, conn_t *conn)
+{
+	bool keep_alive;
+
+	if(conn->served >= 20)
+		keep_alive = 0;
+
+	if(ctx->connum > 0.6 * ctx->maxconns)
+		keep_alive = 0;
+
+	return keep_alive;
+}
+
+static void append_header_to_output_buffer(conn_t *conn, xh_pair header)
+{
+	append_string_to_output_buffer(conn, header.key);
+	append_string_to_output_buffer(conn, xh_string_from_literal(": "));
+	append_string_to_output_buffer(conn, header.val);
+	append_string_to_output_buffer(conn, xh_string_from_literal("\r\n"));
+}
+
+static void write_response_head_to_output_buffer(xh_response *res, conn_t *conn)
+{
+	char buffer[256];
+
+	const char *status_text = statis_code_to_status_text(res->status);
+	assert(status_text != NULL);
+
+	int n = snprintf(buffer, sizeof(buffer), 
+		             "HTTP/1.1 %d %s\r\n", 
+		             res->status, status_text);
+	assert(n >= 0);
+
+	if((unsigned int) n > sizeof(buffer)-1)
+		n = sizeof(buffer)-1;
+
+	append_string_to_output_buffer(conn, xh_string_new(buffer, n));
+	for(int i = 0; i < res->headers.count; i += 1)
+		append_header_to_output_buffer(conn, res->headers.list[i]);
+	append_string_to_output_buffer(conn, xh_string_from_literal("\r\n"));
 }
 
 static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *conn)
 {
+	bool head_only, keep_alive;
 	xh_request *req = &conn->request.public;
 
-	bool keep_alive;
+	keep_alive = client_wants_to_keep_alive(req) 
+	          && server_wants_to_keep_alive(ctx, conn);
+
+	// If it's a HEAD request, tell the callback that
+	// it's a GET request but then throw awaiy the body.
+	if(req->method_id == XH_HEAD)
 	{
-		const char *h_connection = xh_header_get(req, "Connection");
-
-		if(h_connection == NULL)
-			// No [Connection] header. No keep-alive.
-			keep_alive = 0;
-		else
-		{
-			// TODO: Make string comparisons case and whitespace insensitive.
-			if(!strcmp(h_connection, " Keep-Alive"))
-				keep_alive = 1;
-			else if(!strcmp(h_connection, " Close"))
-				keep_alive = 0;
-			else
-				keep_alive = 0;
-		}
-	}
-
-	if(keep_alive)
-	{
-		if(conn->served >= 20)
-			keep_alive = 0;
-
-		if(ctx->connum > 0.6 * ctx->maxconns)
-			keep_alive = 0;
-	}
-
-	bool head_only = req->method_id == XH_HEAD;
-
-	if(head_only)
-	{
+		head_only = 1;
 		req->method_id = XH_GET;
-		req->method.str = "GET";
-		req->method.len = sizeof("GET")-1;
+		req->method = xh_string_from_literal("GET");
 	}
 
 	xh_response2 res2;
+	res_init(&res2);
+
 	xh_response *res = &res2.public;
-	memset(&res2, 0, sizeof(xh_response2));
-	res2.type = XH_RES;
-	res->body.len = -1;
 
 	ctx->callback(req, res, ctx->userp);
 
-	if(req->headers.list != NULL)
-	{
-		free(req->headers.list);
-		req->headers.list = NULL;
-		req->headers.count = 0;
-	}
-
-	if(res->close)
-		keep_alive = 0;
+	req_deinit(req);
 
 	if(res2.failed)
 	{
 		// Failed to build the response.
-		append(conn, "HTTP/1.1 500 Internal Server Error\r\n", -1);
-		append(conn, keep_alive ? "Connection: Keep-Alive\r\n" : "Connection: Close\r\n", -1);
+		append_string_to_output_buffer(conn, 
+			xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n"));
+		
+		append_string_to_output_buffer(conn, keep_alive 
+			? xh_string_from_literal("Connection: Keep-Alive\r\n") 
+			: xh_string_from_literal("Connection: Close\r\n"));
 		goto done;
 	}
+
+	if(res->close) // Callback wants to close.
+		keep_alive = 0;
 
 	if(res->file != NULL)
 	{
 		int fd = open(res->file, O_RDONLY);
 		if(fd < 0) {
 			switch(errno) {
-				case EACCES: append(conn, "HTTP/1.1 403 Forbidden\r\n\r\n", -1); break;
-				case ENOENT: append(conn, "HTTP/1.1 404 Not Found\r\n\r\n", -1); break;
-				default: append(conn, "HTTP/1.1 500 Internal Server Error\r\n\r\n", -1); break;
+				case EACCES: 
+				append_string_to_output_buffer(conn, 
+					xh_string_from_literal("HTTP/1.1 403 Forbidden\r\n\r\n")); 
+				break;
+				
+				case ENOENT: 
+				append_string_to_output_buffer(conn, 
+					xh_string_from_literal("HTTP/1.1 404 Not Found\r\n\r\n"));
+				break;
+				
+				default:
+				append_string_to_output_buffer(conn, 
+					xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n\r\n")); 
+				break;
 			}
 			goto done;
 		}
@@ -1147,14 +1223,16 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 		struct stat buf;
 		if(fstat(fd, &buf))
 		{
-			append(conn, "HTTP/1.1 500 Internal Server Error\r\n\r\n", -1);
+			append_string_to_output_buffer(conn, 
+				xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n\r\n"));
 			goto done;
 		}
 
 		if(!S_ISREG(buf.st_mode))
 		{
 			// Path doesn't refer to a regular file.
-			append(conn, "HTTP/1.1 500 Internal Server Error\r\n\r\n", -1);
+			append_string_to_output_buffer(conn, 
+				xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n\r\n"));
 			goto done;
 		}
 
@@ -1177,42 +1255,23 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	}
 	else content_length = 0;
 
-	xh_header_add(res, "Content-Length", "%d", content_length);
-	xh_header_add(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
-
 	if(res2.failed)
 	{
 		// Failed to build the response. We'll send a 500.
-		append(conn, "HTTP/1.1 500 Internal Server Error\r\n", -1);
-		append(conn, keep_alive ? "Connection: Keep-Alive\r\n" : "Connection: Close\r\n", -1);
+		append_string_to_output_buffer(conn, 
+			xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n"));
+		append_string_to_output_buffer(conn, keep_alive 
+			  ? xh_string_from_literal("Connection: Keep-Alive\r\n") 
+			  : xh_string_from_literal("Connection: Close\r\n"));
 	}
 	else
 	{
-		char buffer[256];
-
-		const char *status_text = statis_code_to_status_text(res->status);
-		assert(status_text != NULL);
-
-		int n = snprintf(
-			buffer, sizeof(buffer), 
-			"HTTP/1.1 %d %s\r\n", 
-			res->status, status_text);
-		assert(n >= 0);
-
-		if((unsigned int) n > sizeof(buffer)-1)
-			n = sizeof(buffer)-1;
-
-		append(conn, buffer, n);
-
-		for(int i = 0; i < res2.headers.count; i += 1)
-		{
-			append(conn, res2.headers.list[i].key.str, res2.headers.list[i].key.len);
-			append(conn, ": ", 2);
-			append(conn, res2.headers.list[i].val.str, res2.headers.list[i].val.len);
-			append(conn, "\r\n", 2);
-		}
-		append(conn, "\r\n", 2);
+		xh_header_add(res, "Content-Length", "%d", content_length);
+		xh_header_add(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
+		write_response_head_to_output_buffer(res, conn);
 	}
+
+	/* Now write the body to the output */
 
 	if(head_only == 1)
 	{
@@ -1224,19 +1283,14 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	}
 	else
 		if(!conn->sending_from_fd)
-			append(conn, res->body.str, 
-				         res->body.len);
+			append_string_to_output_buffer(conn, res->body);
 done:
 	conn->served += 1;
 
 	if(!keep_alive)
 		conn->close_when_uploaded = 1;
 
-	for(int i = 0; i < res2.headers.count; i += 1)
-			free(res2.headers.list[i].key.str);
-
-	if(res2.headers.list != NULL)
-		free(res2.headers.list);
+	res_deinit(&res2);
 }
 
 static uint32_t determine_content_length(xh_request *req)
@@ -1419,7 +1473,8 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 				//       since we'll close the connection after this
 				//       response either way.
 
-				append(conn, buffer, -1);
+				append_string_to_output_buffer(conn, 
+					xh_string_new(buffer, -1));
 				conn->close_when_uploaded = 1;
 				return;
 			}
