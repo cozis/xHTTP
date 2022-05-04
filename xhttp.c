@@ -1281,7 +1281,7 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 			break;
 
 			case ORF_OK:
-			assert(fd >= 0 && content_length >= 0);
+			assert(file_fd >= 0 && content_length >= 0);
 			sending_file = 1;
 			break;
 
