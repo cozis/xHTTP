@@ -1059,11 +1059,14 @@ static uint32_t find(const char *str, uint32_t len, const char *seq)
 	}
 }
 
-#define xh_string_new(s, l) ((xh_string) { (s), (l) < 0 ? (int) strlen(s) : (l) })
+#define xh_string_new(s, l) ((xh_string) { (s), ((int) (l)) < 0 ? (int) strlen(s) : (int) (l) })
 #define xh_string_from_literal(s) ((xh_string) { (s), sizeof(s)-1 })
 
 static void append_string_to_output_buffer(conn_t *conn, xh_string data)
 {
+	if(conn->sending_from_fd)
+		conn->failed_to_append = 1;
+
 	if(conn->failed_to_append)
 		return;
 
@@ -1135,37 +1138,67 @@ static void append_header_to_output_buffer(conn_t *conn, xh_pair header)
 	append_string_to_output_buffer(conn, xh_string_from_literal("\r\n"));
 }
 
-static void write_response_head_to_output_buffer(xh_response *res, conn_t *conn)
+static void append_response_status_line_to_output_buffer(conn_t *conn, int status)
 {
 	char buffer[256];
 
-	const char *status_text = statis_code_to_status_text(res->status);
+	const char *status_text = statis_code_to_status_text(status);
 	assert(status_text != NULL);
 
-	int n = snprintf(buffer, sizeof(buffer), 
-		             "HTTP/1.1 %d %s\r\n", 
-		             res->status, status_text);
+	int n = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d %s\r\n", 
+		             status, status_text);
 	assert(n >= 0);
 
 	if((unsigned int) n > sizeof(buffer)-1)
 		n = sizeof(buffer)-1;
 
 	append_string_to_output_buffer(conn, xh_string_new(buffer, n));
+}
+
+static void append_response_head_to_output_buffer(xh_response *res, conn_t *conn)
+{
+	append_response_status_line_to_output_buffer(conn, res->status);
 	for(int i = 0; i < res->headers.count; i += 1)
 		append_header_to_output_buffer(conn, res->headers.list[i]);
 	append_string_to_output_buffer(conn, xh_string_from_literal("\r\n"));
 }
 
+static enum { 
+	ORF_OK,   ORF_FORBIDDEN, 
+	ORF_NOTFOUND, ORF_OTHER,
+} open_regular_file(const char *file, int *size, int *fd)
+{
+	assert(fd != NULL);
+
+	*fd = open(file, O_RDONLY);
+	if(*fd < 0) {
+		switch(errno) {
+			case EACCES: return ORF_FORBIDDEN;
+			case ENOENT: return ORF_NOTFOUND;
+		}
+		return ORF_OTHER;
+	}
+
+	struct stat buf;
+
+	if(fstat(*fd, &buf))
+		{ close(*fd); return ORF_OTHER; }
+
+	if(!S_ISREG(buf.st_mode)) // Path doesn't refer to a regular file.
+		{ close(*fd); return ORF_OTHER; }
+
+	if(size)
+		*size = buf.st_size;
+	return ORF_OK;
+}
+
 static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *conn)
 {
-	bool head_only, keep_alive;
 	xh_request *req = &conn->request.public;
-
-	keep_alive = client_wants_to_keep_alive(req) 
-	          && server_wants_to_keep_alive(ctx, conn);
 
 	// If it's a HEAD request, tell the callback that
 	// it's a GET request but then throw awaiy the body.
+	bool head_only = 0;
 	if(req->method_id == XH_HEAD)
 	{
 		head_only = 1;
@@ -1174,117 +1207,104 @@ static void generate_response_by_calling_the_callback(context_t *ctx, conn_t *co
 	}
 
 	xh_response2 res2;
-	res_init(&res2);
-
 	xh_response *res = &res2.public;
-
-	ctx->callback(req, res, ctx->userp);
-
-	req_deinit(req);
-
-	if(res2.failed)
 	{
-		// Failed to build the response.
-		append_string_to_output_buffer(conn, 
-			xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n"));
-		
-		append_string_to_output_buffer(conn, keep_alive 
-			? xh_string_from_literal("Connection: Keep-Alive\r\n") 
-			: xh_string_from_literal("Connection: Close\r\n"));
-		goto done;
+		res_init(&res2);
+
+		ctx->callback(req, res, ctx->userp);
+
+		req_deinit(req);
+
+		if(res2.failed)
+		{
+			/* Callback failed to build the response. 
+	         * Overwrite with a new error response.
+			 */
+			res_deinit(&res2);
+			res->status = 500;
+		}
 	}
 
-	if(res->close) // Callback wants to close.
-		keep_alive = 0;
+	bool callback_wants_to_keep_alive = !res->close;
+	bool keep_alive = client_wants_to_keep_alive(req) 
+	               && server_wants_to_keep_alive(ctx, conn)
+	               && callback_wants_to_keep_alive;
 
-	if(res->file != NULL)
+	/* Determine Content-Length and, if the *
+	 * response body  was specified with a  *
+	 * file name, open the file.            */
+
+	int content_length = -1, // Initialized these to shut up 
+	           file_fd = -1; // the compiler :S
+
+	if(res->file == NULL)
 	{
-		int fd = open(res->file, O_RDONLY);
-		if(fd < 0) {
-			switch(errno) {
-				case EACCES: 
-				append_string_to_output_buffer(conn, 
-					xh_string_from_literal("HTTP/1.1 403 Forbidden\r\n\r\n")); 
-				break;
-				
-				case ENOENT: 
-				append_string_to_output_buffer(conn, 
-					xh_string_from_literal("HTTP/1.1 404 Not Found\r\n\r\n"));
-				break;
-				
-				default:
-				append_string_to_output_buffer(conn, 
-					xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n\r\n")); 
-				break;
-			}
-			goto done;
-		}
+		/* The callback specified the 
+		   response body with a string. */
+		if(res->body.str == NULL)
+			res->body.str = "";
 
-		struct stat buf;
-		if(fstat(fd, &buf))
-		{
-			append_string_to_output_buffer(conn, 
-				xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n\r\n"));
-			goto done;
-		}
-
-		if(!S_ISREG(buf.st_mode))
-		{
-			// Path doesn't refer to a regular file.
-			append_string_to_output_buffer(conn, 
-				xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n\r\n"));
-			goto done;
-		}
-
-		conn->file_fd = fd;
-		conn->file_off = 0;
-		conn->file_len = buf.st_size;
-		conn->sending_from_fd = 1;
-	}
-
-	/* Determine content-length */
-	int content_length;
-	if(res->file != NULL)
-		content_length = conn->file_len;
-	else if(res->body.str != NULL)
-	{
 		if(res->body.len < 0)
-			content_length = strlen(res->body.str);
-		else
-			content_length = res->body.len;
-	}
-	else content_length = 0;
-
-	if(res2.failed)
-	{
-		// Failed to build the response. We'll send a 500.
-		append_string_to_output_buffer(conn, 
-			xh_string_from_literal("HTTP/1.1 500 Internal Server Error\r\n"));
-		append_string_to_output_buffer(conn, keep_alive 
-			  ? xh_string_from_literal("Connection: Keep-Alive\r\n") 
-			  : xh_string_from_literal("Connection: Close\r\n"));
+			res->body.len = strlen(res->body.str);
+		
+		content_length = res->body.len;
 	}
 	else
 	{
-		xh_header_add(res, "Content-Length", "%d", content_length);
-		xh_header_add(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
-		write_response_head_to_output_buffer(res, conn);
+		/* The callback specified the 
+		   response body as a file name. */
+
+		switch(open_regular_file(res->file, 
+			&content_length, &file_fd))
+		{
+			case ORF_FORBIDDEN: 
+#warning "TODO"
+			break;
+			
+			case ORF_NOTFOUND:
+#warning "TODO"
+			break;
+
+			case ORF_OTHER: 
+#warning "TODO"
+			break;
+
+			case ORF_OK:
+			break;
+
+			/* Don't add a [default] case to make
+			   sure all return codes are handled. */
+		}
 	}
 
-	/* Now write the body to the output */
+	assert(content_length >= 0 && fd >= 0);
+
+	xh_header_add(res, "Content-Length", "%d", content_length);
+	xh_header_add(res, "Connection", keep_alive ? "Keep-Alive" : "Close");
+	append_response_head_to_output_buffer(res, conn);
+
+	/* Now write the body to the output or, if the *
+     * request was originally HEAD, throw the body *
+     * away.                                       */
 
 	if(head_only == 1)
 	{
 		if(conn->sending_from_fd)
+			close(file_fd);
+	}
+	else 
+	{
+		if(res->file == NULL)
+			append_string_to_output_buffer(conn, res->body);
+		else
 		{
-			close(conn->file_fd);
-			conn->file_fd = -1;
+			conn->file_fd = file_fd;
+			conn->file_off = 0;
+			conn->file_len = content_length;
+			conn->sending_from_fd = 1;
 		}
 	}
-	else
-		if(!conn->sending_from_fd)
-			append_string_to_output_buffer(conn, res->body);
-done:
+
 	conn->served += 1;
 
 	if(!keep_alive)
@@ -1405,7 +1425,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 		downloaded = b->used - before;
 	}
 
-	int served = 0;
+	int served_during_this_while_loop = 0;
 
 	while(1)
 	{
@@ -1415,7 +1435,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 			uint32_t i;
 			{
 				uint32_t start = 0;
-				if(served == 0 && conn->in.used > downloaded + 3)
+				if(served_during_this_while_loop == 0 && conn->in.used > downloaded + 3)
 					start = conn->in.used - downloaded - 3;
 
 				i = find(conn->in.data + start, conn->in.used - start, "\r\n\r\n");
@@ -1473,8 +1493,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 				//       since we'll close the connection after this
 				//       response either way.
 
-				append_string_to_output_buffer(conn, 
-					xh_string_new(buffer, -1));
+				append_string_to_output_buffer(conn, xh_string_new(buffer, -1));
 				conn->close_when_uploaded = 1;
 				return;
 			}
@@ -1486,20 +1505,26 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 
 		if(conn->head_received && conn->body_offset + conn->body_length <= conn->in.used)
 		{
-			// The rest of the body arrived.
-			xh_request *req = &conn->request.public;
+			/* The rest of the body arrived. */
 
-			req->body.str = conn->in.data + conn->body_offset;
-			req->body.len = conn->body_length;
+			// Make the body temporarily zero-terminated: get the byte
+			// that comes after the body, then overwrite it with a '\0'.
+			// When you don't need it to be zero-terminated anymore,
+			// put the saved byte back in.
 
-			// Make the body temporarily zero-terminated.
-			char q = conn->in.data[conn->body_offset + conn->body_length];
+			char first_byte_after_body_in_input_buffer 
+				= conn->in.data[conn->body_offset + conn->body_length];
+
 			conn->in.data[conn->body_offset + conn->body_length] = '\0';
+
+			xh_request *req = &conn->request.public;
+			req->body = xh_string_new(conn->in.data + conn->body_offset, conn->body_length);
 
 			generate_response_by_calling_the_callback(ctx, conn);
 
 			// Restore the byte after the body.
-			conn->in.data[conn->body_offset + conn->body_length] = q;
+			conn->in.data[conn->body_offset + conn->body_length] 
+				= first_byte_after_body_in_input_buffer;
 
 			// Remove the request from the input buffer by
 			// copying back its remaining contents.
@@ -1508,7 +1533,7 @@ static void when_data_is_ready_to_be_read(context_t *ctx, conn_t *conn)
 			conn->in.used -= consumed;
 			conn->head_received = 0;
 
-			served += 1;
+			served_during_this_while_loop += 1;
 
 			if(conn->close_when_uploaded)
 				break;
