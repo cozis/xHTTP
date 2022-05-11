@@ -15,18 +15,24 @@ static void callback(xh_request *req, xh_response *res, void *userp)
 {
     (void) req;
     (void) userp;
-    
+
     int post;
     char username[32];
 
-    if(!xh_urlcmp(req->URL.str, "/users/:s", sizeof(username), username)) {
+    if(!xh_urlcmp(req->URL.str, "/users/:s", 
+                  sizeof(username), username)) {
+
         snprintf(buffer, sizeof(buffer), "Hello, %s!\n", username);
         res->status = 200;
         res->body.str = buffer;
-    } else if(!xh_urlcmp(req->URL.str, "/users/:s/posts/:d", sizeof(username), username, &post)) {
+
+    } else if(!xh_urlcmp(req->URL.str, "/users/:s/posts/:d", 
+              sizeof(username), username, &post)) {
+
         snprintf(buffer, sizeof(buffer), "Hello, %s! You asked for post no. %d!\n", username, post);
         res->status = 200;
         res->body.str = buffer;
+
     } else {
         res->status = 404;
         res->body.str = "It seems like what you're looking for isn't here! :S";
