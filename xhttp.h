@@ -17,15 +17,15 @@ typedef struct {
 } xh_table;
 
 typedef enum {
-	XH_GET     = 1 << 0, 
-	XH_HEAD    = 1 << 1,
-	XH_POST    = 1 << 2,
-	XH_PUT     = 1 << 3,
-	XH_DELETE  = 1 << 4,
-	XH_CONNECT = 1 << 5,
-	XH_OPTIONS = 1 << 6,
-	XH_TRACE   = 1 << 7,
-	XH_PATCH   = 1 << 8,
+	XH_GET     =   1, 
+	XH_HEAD    =   2,
+	XH_POST    =   4,
+	XH_PUT     =   8,
+	XH_DELETE  =  16,
+	XH_CONNECT =  32,
+	XH_OPTIONS =  64,
+	XH_TRACE   = 128,
+	XH_PATCH   = 256,
 } xh_method;
 
 typedef struct {
@@ -67,6 +67,10 @@ void        xh_header_add(xh_response *res, const char *name, const char *valfmt
 void        xh_header_rem(xh_response *res, const char *name);
 const char *xh_header_get(void *req_or_res, const char *name);
 _Bool       xh_header_cmp(const char *a, const char *b);
+
+int  xh_urlcmp(const char *URL, const char *fmt, ...);
+int xh_vurlcmp(const char *URL, const char *fmt, va_list va);
+
 
 #define xh_string_new(s, l) \
 	((xh_string) { (s), ((int) (l)) < 0 ? (int) strlen(s) : (int) (l) })

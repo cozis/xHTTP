@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <assert.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
@@ -1758,4 +1759,111 @@ const char *xhttp(const char *addr, unsigned short port,
 	(void) close(context.fd);
 	(void) close(context.epfd);
 	return NULL;
+}
+
+int xh_urlcmp(const char *URL, const char *fmt, ...)
+{
+	va_list va;
+	va_start(va, fmt);
+	int res = xh_vurlcmp(URL, fmt, va);
+	va_end(va);
+	return res;
+}
+
+/* Returns:
+ *   0 - Match
+ *   1 - No match
+ *  -1 - Error
+ */
+int xh_vurlcmp(const char *URL, const char *fmt, va_list va)
+{
+#define MATCH   0
+#define ERROR  -1
+#define NOMATCH 1
+
+	long i = 0; // Cursor over [fmt]
+	long j = 0; // Cursor over [URL]
+	while(1) {
+
+		while(fmt[i] != '\0' && fmt[i] != ':') {
+
+			if(URL[j] != fmt[i])
+				return NOMATCH;
+			
+			i += 1;
+			j += 1;
+		}
+
+		if(fmt[i] == '\0' || URL[j] == '\0')
+			break;
+
+		assert(URL[j] != '\0');
+		assert(fmt[i] == ':');
+
+		i += 1; // Skip ':'
+
+		if(fmt[i] == 'd') {
+
+			if(!isdigit(URL[j]))
+				return NOMATCH;
+
+			long long buff = 0;
+
+			do {
+
+				long d = (URL[j] - '0');
+
+				if(buff > (LLONG_MAX - d) / 10)
+					return ERROR; /* Overflow */
+
+				buff = buff * 10 + d;
+				
+				j += 1;
+
+			} while(isdigit(URL[j]));
+
+			long long *dst = va_arg(va, long long*);
+			if(dst != NULL)
+				*dst = buff;
+
+		} else if(fmt[i] == 's') {
+
+			long off = j;
+			while(URL[j] != '\0' && URL[j] != '/' && URL[j] != fmt[i+1])
+				j += 1;
+			long len = j - off;
+
+			long  dst_len = va_arg(va, long);
+			char *dst_ptr = va_arg(va, char*);
+
+			if(dst_ptr != NULL && dst_len > 0) {
+				long copy;
+				if(dst_len >= len+1)
+					copy = len;
+				else
+					copy = dst_len-1;
+				memcpy(dst_ptr, URL + off, copy);
+				dst_ptr[copy] = '\0';
+			}
+		
+		} else
+			/* Format ended unexpectedly or 
+			   got an invalid format specifier. */
+			return ERROR;
+
+		i += 1; // Skip the 'd' or 's'
+	}
+
+	/* If the program gets here it means that either
+	 * [fmt] or [URL] ended. If that's the case, if
+	 * the other didn't end, then there's no match.
+	 */ 
+	if(fmt[i] != '\0' || URL[j] != '\0')
+		return NOMATCH;
+
+	return MATCH;
+
+#undef MATCH
+#undef ERROR
+#undef NOMATCH
 }
