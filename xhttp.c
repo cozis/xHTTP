@@ -496,6 +496,7 @@ static void res_deinit(xh_response2 *res)
 		for(int i = 0; i < res->headers.count; i += 1)
 			free(res->headers.list[i].key.str);
 		free(res->headers.list);
+		res->headers.list = NULL;
 	}
 }
 
@@ -866,6 +867,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 		if(unknown_method)
 		{
 			free(headers.list);
+			req->headers.list = NULL;
 			return FAILURE("Unknown method");
 		}
 	}
@@ -949,6 +951,7 @@ static struct parse_err_t parse(char *str, uint32_t len, xh_request *req)
 		if(bad_version)
 		{
 			free(headers.list);
+			req->headers.list = NULL;
 			return FAILURE("Bad HTTP version");
 		}
 	}
