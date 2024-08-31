@@ -1328,7 +1328,7 @@ static uint32_t determine_content_length(xh_request *req)
 {
 	int i;
 	for(i = 0; i < req->headers.count; i += 1)
-		if(!strcmp(req->headers.list[i].key.str, 
+		if(!strcasecmp(req->headers.list[i].key.str, 
 		           "Content-Length")) // TODO: Make it case-insensitive.
 			break;
 
