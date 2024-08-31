@@ -1105,12 +1105,12 @@ static bool client_wants_to_keep_alive(xh_request *req)
 		keep_alive = 0;
 	else
 	{
-		// TODO: Make string comparisons case and whitespace insensitive.
-		if(!strcmp(h_connection, " Keep-Alive"))
+		//remove leading spaces
+		h_connection += strspn(h_connection, " ");
+
+		if(!strcasecmp(h_connection, "Keep-Alive"))
 			keep_alive = 1;
-		else if(!strcmp(h_connection, " Close"))
-			keep_alive = 0;
-		else
+		else /* "Close" or other case */
 			keep_alive = 0;
 	}
 
@@ -1328,7 +1328,7 @@ static uint32_t determine_content_length(xh_request *req)
 {
 	int i;
 	for(i = 0; i < req->headers.count; i += 1)
-		if(!strcmp(req->headers.list[i].key.str, 
+		if(!strcasecmp(req->headers.list[i].key.str, 
 		           "Content-Length")) // TODO: Make it case-insensitive.
 			break;
 
